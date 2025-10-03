@@ -1,0 +1,234 @@
+# Combined Docker Compose for Social Hub
+# Includes both Rocket.Chat (messaging) and Appwrite (backend services)
+
+x-logging: &x-logging
+  logging:
+    driver: "json-file"
+    options:
+      max-file: "5"
+      max-size: "10m"
+
+services:
+  # Rocket.Chat Services (Messaging)
+  rocketchat:
+    image: rocketchat/rocket.chat:latest
+    restart: unless-stopped
+    environment:
+      - PORT=3000
+      - ROOT_URL=http://localhost:3001
+      - MONGO_URL=mongodb://rocket-mongo:27017/rocketchat?replicaSet=rs0
+      - MONGO_OPLOG_URL=mongodb://rocket-mongo:27017/local?replicaSet=rs0
+    depends_on:
+      - rocket-mongo
+    ports:
+      - "3001:3000"
+    networks:
+      - rocket-network
+
+  rocket-mongo:
+    image: mongo:6.0
+    restart: unless-stopped
+    volumes:
+      - rocket-mongodata:/data/db
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all", "--smallfiles"]
+    ports:
+      - "27018:27017"  # Different port to avoid conflict with Appwrite
+    networks:
+      - rocket-network
+
+  # Appwrite Services (Backend)
+  traefik:
+    image: traefik:2.11
+    <<: *x-logging
+    container_name: appwrite-traefik
+    command:
+      - --log.level=DEBUG
+      - --api.insecure=true
+      - --providers.file.directory=/storage/config
+      - --providers.file.watch=true
+      - --providers.docker=true
+      - --providers.docker.exposedByDefault=false
+      - --providers.docker.constraints=Label(`traefik.constraint-label-stack`,`appwrite`)
+      - --entrypoints.appwrite_web.address=:80
+      - --entrypoints.appwrite_websecure.address=:443
+      - --accesslog=true
+    ports:
+      - 8080:80
+      - 8443:443
+      - 9500:8080
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - appwrite-config:/storage/config:ro
+      - appwrite-certificates:/storage/certificates:ro
+    depends_on:
+      - appwrite
+    networks:
+      - gateway
+      - appwrite
+      - runtimes
+
+  appwrite:
+    container_name: appwrite
+    <<: *x-logging
+    image: appwrite-dev
+    build:
+      context: .
+      args:
+        DEBUG: false
+        TESTING: true
+        VERSION: dev
+    ports:
+      - 9501:80
+    networks:
+      - appwrite
+    labels:
+      - "traefik.enable=true"
+      - "traefik.constraint-label-stack=appwrite"
+      - "traefik.docker.network=appwrite"
+      - "traefik.http.services.appwrite_api.loadbalancer.server.port=80"
+      - traefik.http.routers.appwrite_api_http.entrypoints=appwrite_web
+      - traefik.http.routers.appwrite_api_http.rule=PathPrefix(`/`)
+      - traefik.http.routers.appwrite_api_http.service=appwrite_api
+      - traefik.http.routers.appwrite_api_https.entrypoints=appwrite_websecure
+      - traefik.http.routers.appwrite_api_https.rule=PathPrefix(`/`)
+      - traefik.http.routers.appwrite_api_https.service=appwrite_api
+      - traefik.http.routers.appwrite_api_https.tls=true
+    volumes:
+      - appwrite-uploads:/storage/uploads:rw
+      - appwrite-imports:/storage/imports:rw
+      - appwrite-cache:/storage/cache:rw
+      - appwrite-config:/storage/config:rw
+      - appwrite-certificates:/storage/certificates:rw
+      - appwrite-functions:/storage/functions:rw
+      - appwrite-sites:/storage/sites:rw
+      - appwrite-builds:/storage/builds:rw
+      - ./phpunit.xml:/usr/src/code/phpunit.xml
+      - ./tests:/usr/src/code/tests
+      - ./app:/usr/src/code/app
+      - ./docs:/usr/src/code/docs
+      - ./public:/usr/src/code/public
+      - ./src:/usr/src/code/src
+      - ./dev:/usr/src/code/dev
+    depends_on:
+      - mariadb
+      - redis
+    entrypoint:
+      - php
+      - -e
+      - app/http.php
+    environment:
+      - _APP_ENV
+      - _APP_EDITION
+      - _APP_WORKER_PER_CORE
+      - _APP_LOCALE
+      - _APP_COMPRESSION_MIN_SIZE_BYTES
+      - _APP_CONSOLE_WHITELIST_ROOT
+      - _APP_CONSOLE_WHITELIST_EMAILS
+      - _APP_CONSOLE_SESSION_ALERTS
+      - _APP_CONSOLE_WHITELIST_IPS
+      - _APP_CONSOLE_HOSTNAMES
+      - _APP_SYSTEM_EMAIL_NAME
+      - _APP_SYSTEM_EMAIL_ADDRESS
+      - _APP_SYSTEM_TEAM_EMAIL
+      - _APP_EMAIL_SECURITY
+      - _APP_SYSTEM_RESPONSE_FORMAT
+      - _APP_OPTIONS_ABUSE
+      - _APP_OPTIONS_ROUTER_PROTECTION
+      - _APP_OPTIONS_FORCE_HTTPS
+      - _APP_OPTIONS_ROUTER_FORCE_HTTPS
+      - _APP_OPENSSL_KEY_V1
+      - _APP_DOMAIN
+      - _APP_CONSOLE_DOMAIN
+      - _APP_DOMAIN_TARGET_CNAME
+      - _APP_DOMAIN_TARGET_AAAA
+      - _APP_DOMAIN_TARGET_A
+      - _APP_DOMAIN_FUNCTIONS
+      - _APP_REDIS_HOST
+      - _APP_REDIS_PORT
+      - _APP_REDIS_USER
+      - _APP_REDIS_PASS
+      - _APP_DB_HOST
+      - _APP_DB_PORT
+      - _APP_DB_SCHEMA
+      - _APP_DB_USER
+      - _APP_DB_PASS
+      - _APP_SMTP_HOST
+      - _APP_SMTP_PORT
+      - _APP_SMTP_SECURE
+      - _APP_SMTP_USERNAME
+      - _APP_SMTP_PASSWORD
+      - _APP_USAGE_STATS
+      - _APP_STORAGE_LIMIT
+      - _APP_STORAGE_PREVIEW_LIMIT
+      - _APP_STORAGE_ANTIVIRUS
+      - _APP_STORAGE_ANTIVIRUS_HOST
+      - _APP_STORAGE_ANTIVIRUS_PORT
+      - _APP_STORAGE_DEVICE
+      - _APP_FUNCTIONS_TIMEOUT
+      - _APP_EXECUTOR_SECRET
+      - _APP_EXECUTOR_HOST
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - appwrite
+
+  # Essential Appwrite services (keeping the most important ones)
+  mariadb:
+    image: mariadb:10.11
+    container_name: appwrite-mariadb
+    <<: *x-logging
+    networks:
+      - appwrite
+    volumes:
+      - appwrite-mariadb:/var/lib/mysql:rw
+    ports:
+      - "3306:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=${_APP_DB_ROOT_PASS}
+      - MYSQL_DATABASE=${_APP_DB_SCHEMA}
+      - MYSQL_USER=${_APP_DB_USER}
+      - MYSQL_PASSWORD=${_APP_DB_PASS}
+      - MARIADB_AUTO_UPGRADE=1
+    command: "mysqld --innodb-flush-method=fsync"
+
+  redis:
+    image: redis:7.2.4-alpine
+    <<: *x-logging
+    container_name: appwrite-redis
+    command: >
+      redis-server
+      --maxmemory            512mb
+      --maxmemory-policy     allkeys-lru
+      --maxmemory-samples    5
+    ports:
+      - "6379:6379"
+    networks:
+      - appwrite
+    volumes:
+      - appwrite-redis:/data:rw
+
+networks:
+  gateway:
+    name: gateway
+  appwrite:
+    name: appwrite
+  runtimes:
+    name: runtimes
+  rocket-network:
+    name: rocket-network
+
+volumes:
+  # Rocket.Chat volumes
+  rocket-mongodata:
+  
+  # Appwrite volumes
+  appwrite-mariadb:
+  appwrite-redis:
+  appwrite-cache:
+  appwrite-uploads:
+  appwrite-imports:
+  appwrite-certificates:
+  appwrite-functions:
+  appwrite-sites:
+  appwrite-builds:
+  appwrite-config:

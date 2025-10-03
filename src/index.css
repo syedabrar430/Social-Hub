@@ -1,0 +1,208 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    /* Pastel Color Palette */
+    --background: 99 100% 98%; /* Light Gray #F1FAEE */
+    --foreground: 210 15% 25%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 210 15% 25%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 210 15% 25%;
+
+    --primary: 184 35% 70%; /* Pastel Blue #A8DADC */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 146 40% 85%; /* Pastel Green #B8E1C8 */
+    --secondary-foreground: 210 15% 25%;
+
+    --muted: 99 100% 96%;
+    --muted-foreground: 215 16% 47%;
+
+    --accent: 349 65% 90%; /* Pastel Pink #FAD4D4 */
+    --accent-foreground: 210 15% 25%;
+
+    --success: 146 40% 85%; /* Pastel Green */
+    --success-foreground: 210 15% 25%;
+
+    --warning: 44 100% 85%; /* Soft Yellow #FFE5B4 */
+    --warning-foreground: 210 15% 25%;
+
+    --destructive: 0 65% 75%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 210 20% 90%;
+    --input: 210 20% 95%;
+    --ring: 184 35% 70%;
+
+    --radius: 1rem;
+
+    /* Gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(184, 35%, 70%), hsl(146, 40%, 85%));
+    --gradient-accent: linear-gradient(135deg, hsl(349, 65%, 90%), hsl(44, 100%, 85%));
+    --gradient-hero: linear-gradient(135deg, hsl(99, 100%, 98%), hsl(184, 35%, 85%));
+
+    /* Shadows */
+    --shadow-soft: 0 4px 20px -2px hsl(184 35% 70% / 0.15);
+    --shadow-card: 0 2px 15px -3px hsl(184 35% 70% / 0.1);
+    --shadow-glow: 0 0 30px hsl(184 35% 70% / 0.2);
+
+    /* Animations */
+    --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-spring: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  }
+
+  .dark {
+    /* Dark mode with pastel accents */
+    --background: 210 15% 8%;
+    --foreground: 210 10% 95%;
+
+    --card: 210 15% 12%;
+    --card-foreground: 210 10% 95%;
+
+    --popover: 210 15% 12%;
+    --popover-foreground: 210 10% 95%;
+
+    --primary: 184 35% 60%;
+    --primary-foreground: 210 15% 8%;
+
+    --secondary: 146 30% 75%;
+    --secondary-foreground: 210 15% 8%;
+
+    --muted: 210 15% 15%;
+    --muted-foreground: 215 10% 65%;
+
+    --accent: 349 50% 80%;
+    --accent-foreground: 210 15% 8%;
+
+    --success: 146 30% 75%;
+    --success-foreground: 210 15% 8%;
+
+    --warning: 44 80% 75%;
+    --warning-foreground: 210 15% 8%;
+
+    --destructive: 0 50% 65%;
+    --destructive-foreground: 210 10% 95%;
+
+    --border: 210 15% 20%;
+    --input: 210 15% 18%;
+    --ring: 184 35% 60%;
+
+    --gradient-primary: linear-gradient(135deg, hsl(184, 35%, 50%), hsl(146, 30%, 65%));
+    --gradient-accent: linear-gradient(135deg, hsl(349, 50%, 70%), hsl(44, 80%, 65%));
+    --gradient-hero: linear-gradient(135deg, hsl(210, 15%, 12%), hsl(184, 35%, 20%));
+
+    --shadow-soft: 0 4px 20px -2px hsl(0 0% 0% / 0.3);
+    --shadow-card: 0 2px 15px -3px hsl(0 0% 0% / 0.2);
+    --shadow-glow: 0 0 30px hsl(184 35% 50% / 0.3);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-['Poppins'] antialiased;
+  }
+}
+
+@layer components {
+  .gradient-primary {
+    background: var(--gradient-primary);
+  }
+  
+  .gradient-accent {
+    background: var(--gradient-accent);
+  }
+  
+  .gradient-hero {
+    background: var(--gradient-hero);
+  }
+  
+  .shadow-soft {
+    box-shadow: var(--shadow-soft);
+  }
+  
+  .shadow-card {
+    box-shadow: var(--shadow-card);
+  }
+  
+  .shadow-glow {
+    box-shadow: var(--shadow-glow);
+  }
+  
+  .transition-smooth {
+    transition: var(--transition-smooth);
+  }
+  
+  .transition-spring {
+    transition: var(--transition-spring);
+  }
+
+  /* Animation classes */
+  .animate-fade-in {
+    animation: fadeIn 0.5s ease-out;
+  }
+  
+  .animate-slide-up {
+    animation: slideUp 0.4s ease-out;
+  }
+  
+  .animate-scale-in {
+    animation: scaleIn 0.3s ease-out;
+  }
+}
+
+@layer utilities {
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
