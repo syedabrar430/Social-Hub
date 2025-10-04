@@ -49,7 +49,6 @@ export const ProfilePictureViewer: React.FC<ProfilePictureViewerProps> = ({
     setIsUploading(true);
     try {
       await uploadProfilePicture(file);
-      console.log('Profile picture uploaded successfully');
       onClose(); // Close the modal after successful upload
     } catch (error) {
       console.error('Failed to upload profile picture:', error);

@@ -118,14 +118,6 @@ class RocketChatClient:
                 "❤️": ":heart:",
                 "😂": ":joy:",
                 "😮": ":open_mouth:",
-                "😢": ":cry:",
-                "😡": ":rage:",
-                "🎉": ":tada:",
-                "🔥": ":fire:",
-                "👏": ":clap:",
-                "💯": ":100:",
-                "✨": ":sparkles:",
-                "🚀": ":rocket:"
             }
             rocket_emoji = emoji_map.get(emoji, emoji)
             
@@ -155,15 +147,6 @@ class RocketChatClient:
                 "👍": ":+1:",
                 "❤️": ":heart:",
                 "😂": ":joy:",
-                "😮": ":open_mouth:",
-                "😢": ":cry:",
-                "😡": ":rage:",
-                "🎉": ":tada:",
-                "🔥": ":fire:",
-                "👏": ":clap:",
-                "💯": ":100:",
-                "✨": ":sparkles:",
-                "🚀": ":rocket:"
             }
             rocket_emoji = emoji_map.get(emoji, emoji)
             

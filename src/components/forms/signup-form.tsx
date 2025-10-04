@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Eye, EyeOff, Mail, User, Lock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -7,13 +7,11 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
-import { useGoogleAuth } from '@/hooks/use-google-auth';
 
 const SignupForm = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { register, user, loginWithGoogle, error, clearError } = useAuth();
-  const { initializeGoogleSignIn, renderGoogleButton, isLoading: googleLoading } = useGoogleAuth();
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -24,19 +22,6 @@ const SignupForm = () => {
     confirmPassword: '',
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
-
-  // Initialize Google Sign-In when component mounts
-  useEffect(() => {
-    initializeGoogleSignIn();
-  }, []);
-
-  // Render Google button after component mounts
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      renderGoogleButton('google-signin-button');
-    }, 100);
-    return () => clearTimeout(timer);
-  }, []);
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
@@ -70,7 +55,10 @@ const SignupForm = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    console.log('SignupForm: Form submitted with data:', formData);
+    
     if (validateForm()) {
+      console.log('SignupForm: Form validation passed, calling register...');
       setIsLoading(true);
       try {
         await register(formData.email, formData.password, formData.fullName);
@@ -84,6 +72,7 @@ const SignupForm = () => {
           navigate('/profile');
         }, 1500);
       } catch (error) {
+        console.error('SignupForm: Registration error:', error);
         toast({
           title: "Registration failed",
           description: error instanceof Error ? error.message : "Something went wrong. Please try again.",
@@ -92,6 +81,8 @@ const SignupForm = () => {
       } finally {
         setIsLoading(false);
       }
+    } else {
+      console.log('SignupForm: Form validation failed, errors:', errors);
     }
   };
 
@@ -99,13 +90,14 @@ const SignupForm = () => {
     try {
       await loginWithGoogle();
       toast({
-        title: "Redirecting to Google",
-        description: "Please wait while we redirect you to Google for authentication.",
+        title: "Google Signup",
+        description: "Google authentication is currently not available. Please use email signup.",
+        variant: "destructive",
       });
     } catch (error) {
       toast({
-        title: "Google Signup Failed",
-        description: error instanceof Error ? error.message : "Failed to initialize Google signup.",
+        title: "Google Signup Not Available",
+        description: "Please use email and password to create your account.",
         variant: "destructive",
       });
     }

@@ -301,7 +301,7 @@ async def upload_profile_picture(
             shutil.copyfileobj(file.file, buffer)
         
         # Update user's profile picture URL
-        profile_picture_url = f"http://localhost:8001/uploads/profile_pictures/{unique_filename}"
+        profile_picture_url = f"http://localhost:8000/uploads/profile_pictures/{unique_filename}"
         current_user.profile_picture_url = profile_picture_url
         
         db.commit()

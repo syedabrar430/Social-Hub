@@ -118,14 +118,6 @@ const Messages = () => {
     ':open_mouth:': '😮',
     ':cry:': '😢',
     ':angry:': '😠',
-    ':thumbsup:': '👍',
-    ':thumbsdown:': '👎',
-    ':clap:': '👏',
-    ':tada:': '🎉',
-    ':rocket:': '🚀',
-    ':eyes:': '👀',
-    ':thinking_face:': '🤔',
-    ':100:': '💯'
   };
 
   const convertEmojiName = (emojiName: string): string => {

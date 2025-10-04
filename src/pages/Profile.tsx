@@ -13,8 +13,13 @@ const Profile = () => {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const { user, isAuthenticated } = useAuth();
   
+  // Debug logging
+  console.log('Profile component - isAuthenticated:', isAuthenticated);
+  console.log('Profile component - user:', user);
+  
   // If not authenticated, show message or redirect
   if (!isAuthenticated || !user) {
+    console.log('Profile: User not authenticated or user data missing');
     return (
       <ResponsiveLayout>
         <div className="max-w-4xl mx-auto text-center py-12">
@@ -25,24 +30,24 @@ const Profile = () => {
     );
   }
 
-  // Convert API user to match the User interface expected by components
+  // Use the actual user data from AuthContext
   const profileUser = {
-    id: user.$id,
+    id: user.id,
     name: user.name,
     email: user.email,
     avatar: user.name.split(' ').map((n: string) => n[0]).join('').toUpperCase(), // Generate avatar from initials
-    bio: 'Welcome to my profile!', // Default bio for now
-    education_school: '',
-    education_degree: '',
-    location: '',
-    phone: '',
-    profile_picture_url: '',
-    following: 0,
-    followers: 0,
+    bio: user.bio || 'Welcome to my profile!', // Use actual bio or default
+    education_school: user.education_school || '',
+    education_degree: user.education_degree || '',
+    location: user.location || '',
+    phone: user.phone || '',
+    profile_picture_url: user.profile_picture_url || '',
+    following: 0, // Social features - can be implemented later
+    followers: 0, // Social features - can be implemented later
   };
   
   // Filter posts by current user
-  const userPosts = mockPosts.filter(post => post.userId === user.$id);
+  const userPosts = mockPosts.filter(post => post.userId === user.id);
 
   return (
     <ResponsiveLayout>

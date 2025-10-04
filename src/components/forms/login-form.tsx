@@ -69,13 +69,14 @@ const LoginForm = () => {
     try {
       await loginWithGoogle();
       toast({
-        title: "Redirecting to Google",
-        description: "Please wait while we redirect you to Google for authentication.",
+        title: "Google Login",
+        description: "Google authentication is currently not available. Please use email and password.",
+        variant: "destructive",
       });
     } catch (error) {
       toast({
-        title: "Google Login Failed",
-        description: error instanceof Error ? error.message : "Failed to initialize Google login.",
+        title: "Google Login Not Available",
+        description: "Please use your email and password to sign in.",
         variant: "destructive",
       });
     }

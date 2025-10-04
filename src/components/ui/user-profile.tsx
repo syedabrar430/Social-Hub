@@ -7,10 +7,25 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { ProfilePictureViewer } from '@/components/ui/profile-picture-viewer';
 import { useAuth } from '@/contexts/AuthContext';
-import { User } from '@/lib/mockData';
+
+// Use a compatible User type that works with both AuthContext and mockData
+type UserProfile = {
+  id: string;
+  name: string;
+  email: string;
+  bio?: string;
+  education_school?: string;
+  education_degree?: string;
+  location?: string;
+  phone?: string;
+  profile_picture_url?: string;
+  avatar?: string; // For backward compatibility with mockData
+  following?: number;
+  followers?: number;
+};
 
 interface UserProfileProps {
-  user: User;
+  user: UserProfile;
   isOwnProfile?: boolean;
 }
 
