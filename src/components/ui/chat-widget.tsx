@@ -21,10 +21,12 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onOpenFullChat }) => {
   const [showList, setShowList] = useState(true);
   const [channels, setChannels] = useState<ChatConversation[]>([]);
   const [directMessages, setDirectMessages] = useState<ChatConversation[]>([]);
+  const [filteredDMs, setFilteredDMs] = useState<ChatConversation[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<ChatConversation | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loadingChannels, setLoadingChannels] = useState(false);
   const [loadingDMs, setLoadingDMs] = useState(false);
+  const [loadingFilteredDMs, setLoadingFilteredDMs] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [newMessage, setNewMessage] = useState('');
   const [sendingMessage, setSendingMessage] = useState(false);
@@ -154,6 +156,28 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onOpenFullChat }) => {
       hour12: true
     });
   };
+
+  useEffect(() => {
+    let isMounted = true;
+    if (directMessages.length > 0) {
+      setLoadingFilteredDMs(true);
+      Promise.all(
+        directMessages.map(async (dm) => {
+          const messages = await rocketChatService.getDirectMessageMessages(dm.other_user || dm.name);
+          return messages.length > 0 ? dm : null;
+        })
+      ).then(results => {
+        if (isMounted) {
+          setFilteredDMs(results.filter(Boolean) as ChatConversation[]);
+          setLoadingFilteredDMs(false);
+        }
+      });
+    } else {
+      setFilteredDMs([]);
+      setLoadingFilteredDMs(false);
+    }
+    return () => { isMounted = false; };
+  }, [directMessages]);
 
   if (!isOpen) {
     return (
@@ -310,14 +334,14 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onOpenFullChat }) => {
                           <div className="flex justify-center items-center h-20">
                             <div className="text-sm text-gray-500">Loading direct messages...</div>
                           </div>
-                        ) : directMessages.length === 0 ? (
+                        ) : filteredDMs.length === 0 ? (
                           <div className="flex justify-center items-center h-20">
                             <div className="text-sm text-gray-500 text-center">
-                              No direct messages found
+                              No DM's found
                             </div>
                           </div>
                         ) : (
-                          directMessages.flatMap((dm) => {
+                          filteredDMs.flatMap((dm) => {
                             const displayName = dm.display_name || dm.other_user || dm.name || '';
                             const users = displayName.includes(',')
                               ? displayName.split(',').map(name => name.trim())
