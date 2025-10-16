@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Logging into Rocket.Chat...</title>
+  <script>
+    (function() {
+      const params = new URLSearchParams(window.location.search);
+      const token = params.get("authToken");
+      const userId = params.get("userId");
+      const redirect = params.get("redirect") || "/channel/general";
+
+      if (token && userId) {
+        // Save credentials for Meteor client
+        localStorage.setItem("Meteor.loginToken", token);
+        localStorage.setItem("Meteor.userId", userId);
+
+        // Redirect to desired channel
+        window.location.replace(redirect);
+      } else {
+        document.body.innerText = "Missing authToken or userId in URL.";
+      }
+    })();
+  </script>
+</head>
+<body>
+  Redirecting to your Rocket.Chat account...
+</body>
+</html>

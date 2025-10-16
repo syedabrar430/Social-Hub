@@ -1,9 +1,10 @@
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, Enum
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, Enum, ForeignKey, Text
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
 import os
 import enum
+import uuid
 
 # Database URL - using SQLite for simplicity
 DATABASE_URL = "sqlite:///./social_hub.db"
@@ -44,6 +45,21 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+# Chat Message model
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+    
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    message = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    
+    # Relationship to user
+    user = relationship("User", back_populates="chat_messages")
+
+# Add relationship to User model
+User.chat_messages = relationship("ChatMessage", back_populates="user", order_by=ChatMessage.created_at)
 
 # Create tables
 def create_tables():

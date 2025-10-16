@@ -1,8 +1,10 @@
 from sqlalchemy.orm import Session
-from database import User, AuthProvider
+from sqlalchemy import desc
+from database import User, ChatMessage, AuthProvider
 from auth import get_password_hash, verify_password
-from schemas import UserRegistration
-from typing import Optional, Dict, Any
+from schemas import UserRegistration, ChatMessageCreate
+from typing import Optional, Dict, Any, List
+from datetime import datetime
 
 def get_user_by_email(db: Session, email: str) -> Optional[User]:
     """Get user by email"""
@@ -55,3 +57,27 @@ def authenticate_user(db: Session, email: str, password: str) -> Optional[User]:
     if not user.hashed_password or not verify_password(password, user.hashed_password):
         return None
     return user
+
+# Chat CRUD operations
+def create_chat_message(db: Session, user_id: int, message_data: ChatMessageCreate) -> ChatMessage:
+    """Create a new chat message"""
+    db_message = ChatMessage(
+        user_id=user_id,
+        message=message_data.content
+    )
+    db.add(db_message)
+    db.commit()
+    db.refresh(db_message)
+    return db_message
+
+def get_recent_chat_messages(db: Session, limit: int = 50) -> List[ChatMessage]:
+    """Get recent chat messages"""
+    return db.query(ChatMessage).order_by(desc(ChatMessage.created_at)).limit(limit).all()
+
+def get_chat_messages_after(db: Session, after_timestamp: datetime, limit: int = 100) -> List[ChatMessage]:
+    """Get chat messages after a specific timestamp"""
+    return (db.query(ChatMessage)
+            .filter(ChatMessage.created_at > after_timestamp)
+            .order_by(ChatMessage.created_at)
+            .limit(limit)
+            .all())

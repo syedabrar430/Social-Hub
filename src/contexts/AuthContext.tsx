@@ -99,8 +99,17 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
     } catch (error) {
       console.log('CheckAuth: Error during authentication:', error);
-      localStorage.removeItem('access_token');
-      setUser(null);
+      
+      // Only remove token for 401/403 errors, not network errors
+      if (error instanceof TypeError && error.message.includes('fetch')) {
+        console.log('CheckAuth: Network error, keeping token for retry');
+        // Don't remove token on network errors - could be temporary
+        setUser(null); // Clear user but keep token for retry
+      } else {
+        console.log('CheckAuth: Authentication error, removing token');
+        localStorage.removeItem('access_token');
+        setUser(null);
+      }
     } finally {
       setIsLoading(false);
     }

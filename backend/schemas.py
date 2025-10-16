@@ -48,10 +48,31 @@ class UserResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class RocketChatCredentials(BaseModel):
+    rocket_chat_user_id: str
+    rocket_chat_auth_token: str
+    rocket_chat_username: str
+
 class Token(BaseModel):
     access_token: str
     token_type: str
     user: UserResponse
+    rocket_chat: Optional[RocketChatCredentials] = None
 
 class Message(BaseModel):
     message: str
+
+# Chat-related models
+class ChatMessageCreate(BaseModel):
+    content: str
+
+class ChatMessageResponse(BaseModel):
+    id: str
+    user_id: str
+    username: str
+    message: str
+    timestamp: datetime
+    avatar_url: Optional[str] = None
+    
+    class Config:
+        from_attributes = True

@@ -12,10 +12,10 @@ from pathlib import Path
 from google.oauth2 import id_token
 from google.auth.transport import requests
 
-# Import our modules
-from database import get_db, create_tables, User
-from schemas import UserRegistration, UserLogin, UserResponse, Token, Message, GoogleAuthRequest, UserProfileUpdate
-from crud import create_user, authenticate_user, get_user_by_email, get_user_by_id, create_google_user, get_user_by_google_id
+# Import our modules  
+from database import get_db, create_tables, User, ChatMessage
+from schemas import UserRegistration, UserLogin, UserResponse, Token, Message, GoogleAuthRequest, UserProfileUpdate, ChatMessageCreate, ChatMessageResponse
+from crud import create_user, authenticate_user, get_user_by_email, get_user_by_id, create_google_user, get_user_by_google_id, create_chat_message, get_recent_chat_messages
 from auth import create_access_token, verify_token, ACCESS_TOKEN_EXPIRE_MINUTES
 from rocket_chat_local import rocket_client
 
@@ -567,6 +567,293 @@ async def test_rocket_chat_connection():
             return {"status": "disconnected", "message": "Cannot connect to Rocket.Chat"}
     except Exception as e:
         return {"status": "error", "message": f"Connection error: {str(e)}"}
+
+# Rocket.Chat endpoints
+@app.get("/api/rocket-chat/general-messages")
+async def get_general_messages(
+    limit: int = 50,
+    current_user: User = Depends(get_current_user)
+):
+    """Get messages from Rocket.Chat general channel"""
+    try:
+        print(f"DEBUG: Fetching general channel messages for user: {current_user.email}")
+        
+        # Get messages from general channel
+        messages = await rocket_client.get_channel_messages("general", limit)
+        print(f"DEBUG: Raw messages received: {messages}")
+        print(f"DEBUG: Messages type: {type(messages)}, length: {len(messages) if messages else 0}")
+        
+        # Convert Rocket.Chat messages to frontend format
+        formatted_messages = []
+        
+        if not messages:
+            print("DEBUG: No messages found in general channel, creating sample message")
+            # If no messages, create a welcome message
+            formatted_messages = [{
+                "id": "welcome-msg",
+                "sender": "System",
+                "content": "",
+                "timestamp": "2024-01-01T00:00:00.000Z",
+                "isOwn": False,
+                "avatar": None
+            }]
+        else:
+            for i, msg in enumerate(messages):
+                print(f"DEBUG: Processing message {i}: {msg}")
+                if not isinstance(msg, dict):
+                    print(f"DEBUG: Skipping non-dict message {i}")
+                    continue
+                    
+                user_data = msg.get("u", {})
+                
+                # Handle timestamp
+                timestamp = msg.get("ts", "")
+                if isinstance(timestamp, dict):
+                    # Rocket.Chat timestamp format
+                    timestamp = timestamp.get("$date", "")
+                elif timestamp:
+                    # If it's already a string, use as-is
+                    timestamp = str(timestamp)
+                else:
+                    timestamp = "2024-01-01T00:00:00.000Z"
+                
+                # Handle system vs user messages
+                sender_type = msg.get("sender_type", "user")
+                is_system = sender_type == "system"
+                
+                formatted_message = {
+                    "id": msg.get("_id", f"msg-{i}"),
+                    "sender": "System" if is_system else (user_data.get("name") or user_data.get("username", "Unknown")),
+                    "content": msg.get("msg", ""),
+                    "timestamp": timestamp,
+                    "isOwn": not is_system and user_data.get("username") == "ankush1",  # System messages are never own
+                    "avatar": None,  # Rocket.Chat doesn't provide avatar URLs directly
+                    "type": "system" if is_system else "message"
+                }
+                formatted_messages.append(formatted_message)
+                print(f"DEBUG: Formatted message {i}: {formatted_message}")
+        
+        # Reverse to show oldest first (like chat history)
+        formatted_messages.reverse()
+        
+        print(f"DEBUG: Returning {len(formatted_messages)} messages from general channel")
+        return formatted_messages
+        
+    except Exception as e:
+        print(f"Error getting general channel messages: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get messages: {str(e)}")
+
+@app.post("/api/rocket-chat/send-message")
+async def send_message_to_general(
+    message_data: dict,
+    current_user: User = Depends(get_current_user)
+):
+    """Send message to Rocket.Chat general channel"""
+    try:
+        print(f"DEBUG: Sending message to general channel from user: {current_user.email}")
+        
+        # Send message to general channel (authentication handled internally)
+        result = await rocket_client.send_message_to_channel("general", message_data.get("content", ""))
+        print(f"DEBUG: Send message result: {result}")
+        
+        if result.get('success'):
+            return {"success": True, "message": "Message sent successfully"}
+        else:
+            raise HTTPException(status_code=500, detail=f"Failed to send message: {result.get('error', 'Unknown error')}")
+            
+    except Exception as e:
+        print(f"Error sending message to general channel: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to send message: {str(e)}")
+
+@app.get("/api/rocket-chat/dm-messages")
+async def get_dm_messages(
+    username: str,
+    limit: int = 50,
+    current_user: User = Depends(get_current_user)
+):
+    """Get DM messages with a specific user"""
+    try:
+        print(f"DEBUG: Fetching DM messages with {username} for user: {current_user.email}")
+        
+        messages = await rocket_client.get_dm_messages(username, limit)
+        print(f"DEBUG: Got {len(messages)} DM messages with {username}")
+        
+        # Convert to frontend format
+        formatted_messages = []
+        for i, msg in enumerate(messages):
+            if not isinstance(msg, dict):
+                continue
+                
+            user_data = msg.get("u", {})
+            timestamp = msg.get("ts", "")
+            
+            if isinstance(timestamp, dict):
+                timestamp = timestamp.get("$date", "")
+            elif timestamp:
+                timestamp = str(timestamp)
+            else:
+                timestamp = "2024-01-01T00:00:00.000Z"
+            
+            formatted_message = {
+                "id": msg.get("_id", f"dm-{i}"),
+                "sender": user_data.get("name") or user_data.get("username", "Unknown"),
+                "content": msg.get("msg", ""),
+                "timestamp": timestamp,
+                "isOwn": user_data.get("username") == "ankush1",
+                "avatar": None,
+                "type": "message"
+            }
+            formatted_messages.append(formatted_message)
+        
+        formatted_messages.reverse()
+        return formatted_messages
+        
+    except Exception as e:
+        print(f"Error getting DM messages with {username}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get DM messages: {str(e)}")
+
+@app.get("/api/rocket-chat/dm-list")
+async def get_dm_list(current_user: User = Depends(get_current_user)):
+    """Get all DM conversations"""
+    try:
+        dm_list = await rocket_client.get_direct_messages_list()
+        return {"dms": dm_list}
+    except Exception as e:
+        print(f"Error getting DM list: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get DM list: {str(e)}")
+
+@app.post("/api/rocket-chat/send-dm")
+async def send_dm_message(
+    message_data: dict,
+    current_user: User = Depends(get_current_user)
+):
+    """Send a direct message"""
+    try:
+        username = message_data.get("username")
+        message = message_data.get("message")
+        
+        if not username or not message:
+            raise HTTPException(status_code=400, detail="Username and message are required")
+        
+        result = await rocket_client.send_direct_message(username, message)
+        
+        if result.get("success"):
+            return {"success": True, "message": "DM sent successfully"}
+        else:
+            raise HTTPException(status_code=500, detail=f"Failed to send DM: {result.get('error', 'Unknown error')}")
+            
+    except Exception as e:
+        print(f"Error sending DM: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to send DM: {str(e)}")
+
+@app.get("/api/rocket-chat/user-rooms")
+async def get_user_rooms(current_user: User = Depends(get_current_user)):
+    """Get all rooms the user is part of"""
+    try:
+        rooms = await rocket_client.get_all_user_rooms()
+        return rooms
+    except Exception as e:
+        print(f"Error getting user rooms: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get user rooms: {str(e)}")
+
+@app.get("/api/rocket-chat/channels")
+async def get_all_channels(current_user: User = Depends(get_current_user)):
+    """Get all available channels and private groups"""
+    try:
+        print(f"DEBUG: Fetching all channels for user: {current_user.email}")
+        channels = await rocket_client.get_all_conversations()
+        print(f"DEBUG: Returning {len(channels)} channels")
+        return channels
+    except Exception as e:
+        print(f"Error getting channels: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get channels: {str(e)}")
+
+@app.get("/api/rocket-chat/channel-messages/{channel_identifier}")
+async def get_channel_messages_by_id(
+    channel_identifier: str,
+    limit: int = 50,
+    channel_type: str = "channel",
+    current_user: User = Depends(get_current_user)
+):
+    """Get messages from any channel or private group by ID or name"""
+    try:
+        print(f"DEBUG: Fetching messages for {channel_type}: {channel_identifier} (user: {current_user.email})")
+        
+        # Get messages from the specified channel
+        messages = await rocket_client.get_channel_messages(channel_identifier, limit, channel_type)
+        print(f"DEBUG: Raw messages received: {len(messages) if messages else 0} messages")
+        
+        # Convert Rocket.Chat messages to frontend format
+        formatted_messages = []
+        
+        if not messages:
+            print("DEBUG: No messages found, returning empty list")
+            return []
+        
+        for i, msg in enumerate(messages):
+            if not isinstance(msg, dict):
+                print(f"DEBUG: Skipping non-dict message {i}")
+                continue
+                
+            user_data = msg.get("u", {})
+            
+            # Handle timestamp
+            timestamp = msg.get("ts", "")
+            if isinstance(timestamp, dict):
+                timestamp = timestamp.get("$date", "")
+            elif timestamp:
+                timestamp = str(timestamp)
+            else:
+                timestamp = "2024-01-01T00:00:00.000Z"
+            
+            # Handle system vs user messages
+            sender_type = msg.get("sender_type", "user")
+            is_system = sender_type == "system"
+            
+            formatted_message = {
+                "id": msg.get("_id", f"msg-{i}"),
+                "sender": "System" if is_system else (user_data.get("name") or user_data.get("username", "Unknown")),
+                "content": msg.get("msg", ""),
+                "timestamp": timestamp,
+                "isOwn": not is_system and user_data.get("username") == "ankush1",
+                "avatar": None,
+                "type": "system" if is_system else "message"
+            }
+            formatted_messages.append(formatted_message)
+        
+        # Reverse to show oldest first (like chat history)
+        formatted_messages.reverse()
+        
+        print(f"DEBUG: Returning {len(formatted_messages)} formatted messages")
+        return formatted_messages
+        
+    except Exception as e:
+        print(f"Error getting channel messages: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get messages: {str(e)}")
+
+@app.post("/api/rocket-chat/send-channel-message/{channel_identifier}")
+async def send_message_to_any_channel(
+    channel_identifier: str,
+    message_data: dict,
+    channel_type: str = "channel",
+    current_user: User = Depends(get_current_user)
+):
+    """Send message to any channel or private group"""
+    try:
+        print(f"DEBUG: Sending message to {channel_type}: {channel_identifier} from user: {current_user.email}")
+        
+        # Send message to the specified channel
+        result = await rocket_client.send_message_to_channel(channel_identifier, message_data.get("content", ""))
+        print(f"DEBUG: Send message result: {result}")
+        
+        if result.get('success'):
+            return {"success": True, "message": "Message sent successfully"}
+        else:
+            raise HTTPException(status_code=500, detail=f"Failed to send message: {result.get('error', 'Unknown error')}")
+            
+    except Exception as e:
+        print(f"Error sending message to channel: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to send message: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
