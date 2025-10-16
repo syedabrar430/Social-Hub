@@ -317,30 +317,32 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onOpenFullChat }) => {
                             </div>
                           </div>
                         ) : (
-                          directMessages.map((dm) => (
-                            <div
-                              key={dm.id}
-                              className="p-3 rounded-lg border hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors"
-                              onClick={() => handleConversationSelect(dm)}
-                            >
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center space-x-2">
-                                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                                  <div>
-                                    <div className="font-medium text-sm">
-                                      {dm.display_name || dm.other_user || dm.name}
-                                    </div>
-                                    <div className="text-xs text-gray-500">
-                                      Direct message
+                          directMessages.flatMap((dm) => {
+                            const displayName = dm.display_name || dm.other_user || dm.name || '';
+                            const users = displayName.includes(',')
+                              ? displayName.split(',').map(name => name.trim())
+                              : [displayName];
+                            return users.map((userName, index) => (
+                              <div
+                                key={`${dm.id}-${index}`}
+                                className="p-3 rounded-lg border hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors"
+                                onClick={() => handleConversationSelect({ ...dm, other_user: userName, display_name: userName })}
+                              >
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center space-x-2">
+                                    <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                                    <div>
+                                      <div className="font-medium text-sm">{userName}</div>
+                                      <div className="text-xs text-gray-500">Direct message</div>
                                     </div>
                                   </div>
-                                </div>
-                                <div className="text-xs text-gray-400">
-                                  {dm.unread_count && dm.unread_count > 0 ? `${dm.unread_count} msgs` : 'Click to view'}
+                                  <div className="text-xs text-gray-400">
+                                    {dm.unread_count && dm.unread_count > 0 ? `${dm.unread_count} msgs` : 'Click to view'}
+                                  </div>
                                 </div>
                               </div>
-                            </div>
-                          ))
+                            ));
+                          })
                         )}
                       </>
                     )}
