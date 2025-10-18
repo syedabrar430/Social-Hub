@@ -1,10 +1,205 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Send, Phone, Video, MoreVertical, Hash, Lock, MessageSquare } from 'lucide-react';
+import { Send, Phone, Video, MoreVertical, Hash, Lock, MessageSquare, Reply, Smile, ThumbsUp, Heart, Laugh, Angry, Frown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { chatService, type ChatMessage, type ChatConversation } from '@/services/chat';
 import { useToast } from '@/hooks/use-toast';
+
+// Helper function to format message timestamp
+const formatMessageTime = (timestamp: string) => {
+  const messageDate = new Date(timestamp);
+  const now = new Date();
+  const isToday = messageDate.toDateString() === now.toDateString();
+  const isYesterday = messageDate.toDateString() === new Date(now.getTime() - 24 * 60 * 60 * 1000).toDateString();
+  
+  if (isToday) {
+    return messageDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  } else if (isYesterday) {
+    return `Yesterday ${messageDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  } else {
+    return messageDate.toLocaleDateString([], { 
+      month: 'short', 
+      day: 'numeric',
+      hour: '2-digit', 
+      minute: '2-digit' 
+    });
+  }
+};
+
+// Message component with reactions and threads
+const MessageComponent: React.FC<{ 
+  message: ChatMessage; 
+  isThreadMessage?: boolean;
+  onReactionToggle: (messageId: string, emoji: string) => void;
+  onSendThreadMessage: (parentMessageId: string, text: string) => void;
+  reactionEmojis: Array<{ emoji: string; icon: any; label: string }>;
+  showReactionPicker: string | null;
+  setShowReactionPicker: (messageId: string | null) => void;
+}> = ({ 
+  message, 
+  isThreadMessage = false, 
+  onReactionToggle, 
+  onSendThreadMessage,
+  reactionEmojis,
+  showReactionPicker,
+  setShowReactionPicker
+}) => {
+  const [showThreadInput, setShowThreadInput] = useState(false);
+  const [threadMessage, setThreadMessage] = useState('');
+  const [sendingThread, setSendingThread] = useState(false);
+  
+  const isSystemMessage = message.type === 'system';
+  const isOwnMessage = message.user?.username === 'ankush1'; // Replace with actual current user
+  const hasThreadMessages = message.thread_messages && message.thread_messages.length > 0;
+  const hasReactions = message.reactions && Object.keys(message.reactions).length > 0;
+
+  const handleSendThreadMessageLocal = async () => {
+    if (!threadMessage.trim()) return;
+    
+    setSendingThread(true);
+    try {
+      await onSendThreadMessage(message.id, threadMessage);
+      setThreadMessage('');
+      setShowThreadInput(false);
+    } finally {
+      setSendingThread(false);
+    }
+  };
+
+  return (
+    <div className={`${isThreadMessage ? 'ml-6 border-l-2 border-muted pl-4' : ''}`}>
+      <div
+        className={`flex ${isOwnMessage && !isSystemMessage ? 'justify-end' : 'justify-start'}`}
+      >
+        <div
+          className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
+            isSystemMessage
+              ? 'bg-muted text-center text-sm italic mx-auto'
+              : isOwnMessage
+              ? 'bg-primary text-primary-foreground'
+              : 'bg-muted'
+          }`}
+        >
+          {!isSystemMessage && (
+            <div className="text-xs text-muted-foreground mb-1">
+              {message.user?.username || message.user?.name}
+            </div>
+          )}
+          <p className="text-sm">{message.text || message.content}</p>
+          <div className="text-xs opacity-70 mt-1">
+            {formatMessageTime(message.timestamp)}
+          </div>
+          
+          {/* Reactions */}
+          {hasReactions && (
+            <div className="flex flex-wrap gap-1 mt-2">
+              {Object.entries(message.reactions).map(([emoji, usernames]) => (
+                <button
+                  key={emoji}
+                  onClick={() => onReactionToggle(message.id, emoji)}
+                  className="flex items-center space-x-1 px-2 py-1 rounded-full bg-secondary/50 hover:bg-secondary text-xs"
+                >
+                  <span>{emoji}</span>
+                  <span>{usernames.length}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          
+          {/* Action buttons */}
+          {!isSystemMessage && (
+            <div className="flex items-center space-x-2 mt-2">
+              <button
+                onClick={() => setShowReactionPicker(showReactionPicker === message.id ? null : message.id)}
+                className="text-xs text-muted-foreground hover:text-foreground flex items-center space-x-1"
+              >
+                <Smile className="h-3 w-3" />
+                <span>React</span>
+              </button>
+              
+              <button
+                onClick={() => setShowThreadInput(!showThreadInput)}
+                className="text-xs text-muted-foreground hover:text-foreground flex items-center space-x-1"
+              >
+                <Reply className="h-3 w-3" />
+                <span>Reply</span>
+                {message.thread_count && message.thread_count > 0 && (
+                  <span>({message.thread_count})</span>
+                )}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+      
+      {/* Reaction picker */}
+      {showReactionPicker === message.id && (
+        <div className="flex space-x-1 mt-2 ml-4">
+          {reactionEmojis.map(({ emoji, icon: Icon, label }) => (
+            <button
+              key={emoji}
+              onClick={() => {
+                onReactionToggle(message.id, emoji);
+                setShowReactionPicker(null);
+              }}
+              className="p-1 rounded-full hover:bg-secondary transition-colors"
+              title={label}
+            >
+              <span className="text-lg">{emoji}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      
+      {/* Thread input */}
+      {showThreadInput && (
+        <div className="mt-2 ml-4">
+          <div className="flex space-x-2">
+            <Input
+              placeholder="Reply to this message..."
+              value={threadMessage}
+              onChange={(e) => setThreadMessage(e.target.value)}
+              onKeyPress={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSendThreadMessageLocal();
+                }
+              }}
+              className="flex-1"
+              disabled={sendingThread}
+            />
+            <Button
+              onClick={handleSendThreadMessageLocal}
+              disabled={!threadMessage.trim() || sendingThread}
+              size="sm"
+            >
+              <Send className="h-3 w-3" />
+            </Button>
+          </div>
+        </div>
+      )}
+      
+      {/* Thread messages */}
+      {hasThreadMessages && (
+        <div className="mt-2 space-y-2">
+          {message.thread_messages!.map((threadMsg) => (
+            <MessageComponent
+              key={threadMsg.id}
+              message={threadMsg}
+              isThreadMessage={true}
+              onReactionToggle={onReactionToggle}
+              onSendThreadMessage={onSendThreadMessage}
+              reactionEmojis={reactionEmojis}
+              showReactionPicker={showReactionPicker}
+              setShowReactionPicker={setShowReactionPicker}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 interface ChatWindowProps {
   selectedChannel: ChatConversation;
@@ -16,33 +211,96 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedChannel, isAuthenticate
   const [loading, setLoading] = useState(false);
   const [newMessage, setNewMessage] = useState('');
   const [sending, setSending] = useState(false);
+  const [showReactionPicker, setShowReactionPicker] = useState<string | null>(null);
   const { toast } = useToast();
+
+  // Common reaction emojis
+  const reactionEmojis = [
+    { emoji: '👍', icon: ThumbsUp, label: 'Like' },
+    { emoji: '❤️', icon: Heart, label: 'Love' },
+    { emoji: '😂', icon: Laugh, label: 'Laugh' },
+    { emoji: '😮', icon: Frown, label: 'Surprised' },
+    { emoji: '😢', icon: Frown, label: 'Sad' },
+    { emoji: '😡', icon: Angry, label: 'Angry' },
+    { emoji: '🔥', icon: Heart, label: 'Fire' },
+    { emoji: '💯', icon: ThumbsUp, label: '100' }
+  ];
 
   // Load messages for selected channel
   const loadMessages = useCallback(async () => {
-    if (!selectedChannel || !isAuthenticated) return;
+    console.log('🔄 loadMessages called - selectedChannel:', selectedChannel, 'isAuthenticated:', isAuthenticated);
+    
+    if (!selectedChannel || !isAuthenticated) {
+      console.log('❌ Early return - no channel or not authenticated');
+      return;
+    }
 
     try {
       setLoading(true);
-      console.log('Loading messages for channel:', selectedChannel.name);
+      console.log('📡 Loading messages for channel:', selectedChannel.name);
 
       const channelIdentifier = selectedChannel.name || selectedChannel.id;
       const channelType = selectedChannel.type === 'private_group' ? 'group' : 'channel';
+
+      console.log('🔍 Channel details:', { channelIdentifier, channelType });
 
       const channelMessages = await chatService.getRocketChatChannelMessages(
         channelIdentifier,
         channelType
       );
 
+      console.log('📨 Raw channel messages received:', channelMessages);
+
       // Sort messages by timestamp (oldest first)
       const sortedMessages = channelMessages.sort(
         (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
       );
 
+      // Add some test messages with different dates for testing
+      if (sortedMessages.length === 0) {
+        const now = new Date();
+        const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+        const dayBefore = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000);
+        
+        sortedMessages.push(
+          {
+            id: 'test-1',
+            text: 'This is a message from 2 days ago',
+            user: { id: '1', username: 'test1', name: 'Test User 1' },
+            timestamp: dayBefore.toISOString(),
+            type: 'message',
+            reactions: {},
+            thread_count: 0,
+            thread_messages: []
+          },
+          {
+            id: 'test-2',
+            text: 'This is a message from yesterday',
+            user: { id: '2', username: 'test2', name: 'Test User 2' },
+            timestamp: yesterday.toISOString(),
+            type: 'message',
+            reactions: {},
+            thread_count: 0,
+            thread_messages: []
+          },
+          {
+            id: 'test-3',
+            text: 'This is a message from today',
+            user: { id: '3', username: 'test3', name: 'Test User 3' },
+            timestamp: now.toISOString(),
+            type: 'message',
+            reactions: {},
+            thread_count: 0,
+            thread_messages: []
+          }
+        );
+      }
+
+      console.log('📋 Sorted messages:', sortedMessages);
       setMessages(sortedMessages);
-      console.log(`Loaded ${sortedMessages.length} messages for ${selectedChannel.name}`);
+      console.log(`✅ Loaded ${sortedMessages.length} messages for ${selectedChannel.name}`);
     } catch (error) {
-      console.error('Failed to load messages:', error);
+      console.error('❌ Failed to load messages:', error);
       toast({
         title: "Error",
         description: `Failed to load messages from ${selectedChannel.name}`,
@@ -102,6 +360,65 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedChannel, isAuthenticate
     }
   };
 
+  // Handle reaction toggle
+  const handleReactionToggle = async (messageId: string, emoji: string) => {
+    try {
+      // Check if user already reacted with this emoji
+      const message = messages.find(m => m.id === messageId);
+      if (!message || !message.reactions) return;
+
+      const hasReacted = message.reactions[emoji]?.includes('ankush1'); // Replace with actual current user
+      
+      if (hasReacted) {
+        await chatService.removeReaction(messageId, emoji);
+        toast({
+          title: "Reaction removed",
+          description: `Removed ${emoji} reaction`,
+        });
+      } else {
+        await chatService.addReaction(messageId, emoji);
+        toast({
+          title: "Reaction added",
+          description: `Added ${emoji} reaction`,
+        });
+      }
+      
+      // Reload messages to show updated reactions
+      await loadMessages();
+    } catch (error) {
+      console.error('Failed to toggle reaction:', error);
+      toast({
+        title: "Error",
+        description: "Failed to update reaction",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Handle thread message send
+  const handleSendThreadMessage = async (parentMessageId: string, text: string) => {
+    try {
+      const channelIdentifier = selectedChannel.name || selectedChannel.id;
+      await chatService.sendThreadMessage(channelIdentifier, parentMessageId, text);
+      
+      toast({
+        title: "Thread message sent!",
+        description: "Your reply has been sent",
+      });
+      
+      // Reload messages to show the new thread message
+      await loadMessages();
+    } catch (error) {
+      console.error('Failed to send thread message:', error);
+      toast({
+        title: "Error",
+        description: "Failed to send thread message",
+        variant: "destructive",
+      });
+    }
+  };
+
+
   const isPrivate = selectedChannel.type === 'private_group' || selectedChannel.is_private;
   const channelDisplayName = selectedChannel.display_name || selectedChannel.name;
 
@@ -151,37 +468,54 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedChannel, isAuthenticate
               <p>No messages yet. Start a conversation!</p>
             </div>
           ) : (
-            messages.map((message) => {
-              const isSystemMessage = message.type === 'system';
-              const isOwnMessage = message.user?.username === 'ankush1'; // You may want to get this from auth context
-
-              return (
-                <div
-                  key={message.id}
-                  className={`flex ${isOwnMessage && !isSystemMessage ? 'justify-end' : 'justify-start'}`}
-                >
-                  <div
-                    className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
-                      isSystemMessage
-                        ? 'bg-muted text-center text-sm italic mx-auto'
-                        : isOwnMessage
-                        ? 'bg-primary text-primary-foreground'
-                        : 'bg-muted'
-                    }`}
-                  >
-                    {!isSystemMessage && (
-                      <div className="text-xs text-muted-foreground mb-1">
-                        {message.user?.name || message.user?.username}
-                      </div>
-                    )}
-                    <p className="text-sm">{message.text || message.content}</p>
-                    <div className="text-xs opacity-70 mt-1">
-                      {new Date(message.timestamp).toLocaleTimeString()}
+            (() => {
+              const messageElements: React.ReactNode[] = [];
+              let lastDate: string | null = null;
+              
+              console.log('🗓️ Processing messages for date separators:', messages.length, 'messages');
+              
+              messages.forEach((message, index) => {
+                const currentMessageDate = new Date(message.timestamp).toDateString();
+                const showDateSeparator = currentMessageDate !== lastDate;
+                
+                console.log(`📅 Message ${index}: ${currentMessageDate}, lastDate: ${lastDate}, showSeparator: ${showDateSeparator}`);
+                
+                if (showDateSeparator) {
+                  console.log(`✨ Adding date separator for: ${currentMessageDate}`);
+                  messageElements.push(
+                    <div key={`date-${message.id}`} className="flex items-center justify-center my-4">
+                      <div className="flex-1 border-t border-muted"></div>
+                      <span className="px-3 text-xs text-muted-foreground bg-background">
+                        {new Date(message.timestamp).toLocaleDateString([], { 
+                          weekday: 'long',
+                          year: 'numeric', 
+                          month: 'long', 
+                          day: 'numeric' 
+                        })}
+                      </span>
+                      <div className="flex-1 border-t border-muted"></div>
                     </div>
-                  </div>
-                </div>
-              );
-            })
+                  );
+                  lastDate = currentMessageDate;
+                }
+                
+                messageElements.push(
+                  <MessageComponent
+                    key={message.id}
+                    message={message}
+                    isThreadMessage={false}
+                    onReactionToggle={handleReactionToggle}
+                    onSendThreadMessage={handleSendThreadMessage}
+                    reactionEmojis={reactionEmojis}
+                    showReactionPicker={showReactionPicker}
+                    setShowReactionPicker={setShowReactionPicker}
+                  />
+                );
+              });
+              
+              console.log('📋 Total elements created:', messageElements.length);
+              return messageElements;
+            })()
           )}
           
           {sending && (

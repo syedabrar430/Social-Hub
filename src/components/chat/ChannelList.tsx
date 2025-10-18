@@ -59,8 +59,6 @@ const ChannelList: React.FC<ChannelListProps> = ({
 
     console.log('🔄 Calling loadChannelsWithMessages()');
     loadChannelsWithMessages();
-
-    loadChannelsWithMessages();
   }, [isAuthenticated, selectedChannel, onChannelSelect, toast]);
 
   // Filter channels based on search query
@@ -145,7 +143,12 @@ const ChannelList: React.FC<ChannelListProps> = ({
                       </p>
                       {channel.last_message?.timestamp && (
                         <p className="text-xs text-muted-foreground/60 mt-1">
-                          {new Date(channel.last_message.timestamp).toLocaleDateString()}
+                          {new Date(channel.last_message.timestamp).toLocaleString([], { 
+                            month: 'short', 
+                            day: 'numeric',
+                            hour: '2-digit', 
+                            minute: '2-digit' 
+                          })}
                         </p>
                       )}
                     </div>

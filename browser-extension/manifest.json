@@ -1,0 +1,19 @@
+{
+    "manifest_version": 3,
+    "name": "Social Hub Integration",
+    "version": "1.0",
+    "description": "Adds a Social Hub button to Rocket.Chat for easy navigation",
+    "content_scripts": [{
+        "matches": ["http://10.68.0.49:30082/*"],
+        "js": ["content.js"],
+        "run_at": "document_end"
+    }],
+    "permissions": [
+        "activeTab" 
+    ],
+    "icons": {
+        "16": "icon16.png",
+        "48": "icon48.png",
+        "128": "icon128.png"
+    }
+}

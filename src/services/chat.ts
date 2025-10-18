@@ -1,4 +1,4 @@
-const API_BASE_URL = 'http://localhost:8000';
+const API_BASE_URL = 'http://localhost:8001';
 
 export interface ChatBootstrapResponse {
   rocket_username: string;
@@ -24,7 +24,9 @@ export interface ChatMessage {
   reactions?: Record<string, string[]>;
   thread_count?: number;
   thread_ts?: string; // Thread timestamp for Rocket.Chat
+  thread_messages?: ChatMessage[]; // Thread messages
   reply_count?: number;
+  is_thread_message?: boolean; // Flag to identify thread messages
   file?: {
     id: string;
     name: string;

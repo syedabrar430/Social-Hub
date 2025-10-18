@@ -595,7 +595,10 @@ async def get_general_messages(
                 "content": "",
                 "timestamp": "2024-01-01T00:00:00.000Z",
                 "isOwn": False,
-                "avatar": None
+                "avatar": None,
+                "reactions": {},
+                "thread_count": 0,
+                "thread_messages": []
             }]
         else:
             for i, msg in enumerate(messages):
@@ -621,6 +624,62 @@ async def get_general_messages(
                 sender_type = msg.get("sender_type", "user")
                 is_system = sender_type == "system"
                 
+                # Get thread count and check if we should include thread messages
+                thread_count = msg.get("tcount", 0)
+                thread_messages = []
+                
+                # Only fetch thread messages if there are more than 0 messages in the thread
+                if thread_count > 0:
+                    try:
+                        thread_response = await rocket_client.get_thread_messages(msg.get("_id", ""))
+                        if thread_response:
+                            for thread_msg in thread_response:
+                                if isinstance(thread_msg, dict):
+                                    thread_user_data = thread_msg.get("u", {})
+                                    thread_timestamp = thread_msg.get("ts", "")
+                                    if isinstance(thread_timestamp, dict):
+                                        thread_timestamp = thread_timestamp.get("$date", "")
+                                    elif thread_timestamp:
+                                        thread_timestamp = str(thread_timestamp)
+                                    else:
+                                        thread_timestamp = "2024-01-01T00:00:00.000Z"
+                                    
+                                    thread_messages.append({
+                                        "id": thread_msg.get("_id", ""),
+                                        "text": thread_msg.get("msg", ""),
+                                        "user": {
+                                            "id": thread_user_data.get("_id", ""),
+                                            "username": thread_user_data.get("username", "unknown"),
+                                            "name": thread_user_data.get("name", thread_user_data.get("username", "Unknown User"))
+                                        },
+                                        "timestamp": thread_timestamp,
+                                        "edited_at": thread_msg.get("_updatedAt"),
+                                        "reactions": thread_msg.get("reactions", {}),
+                                        "is_thread_message": True
+                                    })
+                    except Exception as e:
+                        print(f"DEBUG: Failed to fetch thread messages for {msg.get('_id', '')}: {e}")
+                
+                # Convert reactions format
+                reactions = {}
+                if msg.get("reactions"):
+                    for emoji, reaction_data in msg["reactions"].items():
+                        # Convert colon format back to unicode for display
+                        emoji_display_map = {
+                            ":+1:": "👍",
+                            ":heart:": "❤️", 
+                            ":joy:": "😂",
+                            ":open_mouth:": "😮",
+                            ":cry:": "😢",
+                            ":rage:": "😡",
+                            ":thumbsup:": "👍",
+                            ":thumbsdown:": "👎",
+                            ":fire:": "🔥",
+                            ":100:": "💯"
+                        }
+                        display_emoji = emoji_display_map.get(emoji, emoji)
+                        reactions[display_emoji] = reaction_data.get("usernames", [])
+                
                 formatted_message = {
                     "id": msg.get("_id", f"msg-{i}"),
                     "sender": "System" if is_system else (user_data.get("name") or user_data.get("username", "Unknown")),
@@ -628,7 +687,10 @@ async def get_general_messages(
                     "timestamp": timestamp,
                     "isOwn": not is_system and user_data.get("username") == "ankush1",  # System messages are never own
                     "avatar": None,  # Rocket.Chat doesn't provide avatar URLs directly
-                    "type": "system" if is_system else "message"
+                    "type": "system" if is_system else "message",
+                    "reactions": reactions,
+                    "thread_count": thread_count,
+                    "thread_messages": thread_messages
                 }
                 formatted_messages.append(formatted_message)
                 print(f"DEBUG: Formatted message {i}: {formatted_message}")
@@ -810,13 +872,76 @@ async def get_channel_messages_by_id(
             sender_type = msg.get("sender_type", "user")
             is_system = sender_type == "system"
             
+            # Get thread count and check if we should include thread messages
+            thread_count = msg.get("tcount", 0)
+            thread_messages = []
+            
+            # Only fetch thread messages if there are more than 0 messages in the thread
+            if thread_count > 0:
+                try:
+                    thread_response = await rocket_client.get_thread_messages(msg.get("_id", ""))
+                    if thread_response:
+                        for thread_msg in thread_response:
+                            if isinstance(thread_msg, dict):
+                                thread_user_data = thread_msg.get("u", {})
+                                thread_timestamp = thread_msg.get("ts", "")
+                                if isinstance(thread_timestamp, dict):
+                                    thread_timestamp = thread_timestamp.get("$date", "")
+                                elif thread_timestamp:
+                                    thread_timestamp = str(thread_timestamp)
+                                else:
+                                    thread_timestamp = "2024-01-01T00:00:00.000Z"
+                                
+                                thread_messages.append({
+                                    "id": thread_msg.get("_id", ""),
+                                    "text": thread_msg.get("msg", ""),
+                                    "user": {
+                                        "id": thread_user_data.get("_id", ""),
+                                        "username": thread_user_data.get("username", "unknown"),
+                                        "name": thread_user_data.get("name", thread_user_data.get("username", "Unknown User"))
+                                    },
+                                    "timestamp": thread_timestamp,
+                                    "edited_at": thread_msg.get("_updatedAt"),
+                                    "reactions": thread_msg.get("reactions", {}),
+                                    "is_thread_message": True
+                                })
+                except Exception as e:
+                    print(f"DEBUG: Failed to fetch thread messages for {msg.get('_id', '')}: {e}")
+            
+            # Convert reactions format
+            reactions = {}
+            if msg.get("reactions"):
+                for emoji, reaction_data in msg["reactions"].items():
+                    # Convert colon format back to unicode for display
+                    emoji_display_map = {
+                        ":+1:": "👍",
+                        ":heart:": "❤️", 
+                        ":joy:": "😂",
+                        ":open_mouth:": "😮",
+                        ":cry:": "😢",
+                        ":rage:": "😡",
+                        ":thumbsup:": "👍",
+                        ":thumbsdown:": "👎",
+                        ":fire:": "🔥",
+                        ":100:": "💯"
+                    }
+                    display_emoji = emoji_display_map.get(emoji, emoji)
+                    reactions[display_emoji] = reaction_data.get("usernames", [])
+            
             formatted_message = {
                 "id": msg.get("_id", f"msg-{i}"),
-                "sender": "System" if is_system else (user_data.get("name") or user_data.get("username", "Unknown")),
-                "content": msg.get("msg", ""),
+                "text": msg.get("msg", ""),
+                "user": {
+                    "id": user_data.get("_id", "unknown"),
+                    "username": user_data.get("username", "Unknown"),
+                    "name": user_data.get("name") or user_data.get("username", "Unknown User")
+                },
                 "timestamp": timestamp,
-                "isOwn": not is_system and user_data.get("username") == "ankush1",
-                "avatar": None,
+                "edited_at": msg.get("_updatedAt") if msg.get("_updatedAt") else None,
+                "reactions": reactions,
+                "thread_count": thread_count,
+                "thread_ts": msg.get("tmid"),
+                "thread_messages": thread_messages,  # Include thread messages
                 "type": "system" if is_system else "message"
             }
             formatted_messages.append(formatted_message)
@@ -824,7 +949,7 @@ async def get_channel_messages_by_id(
         # Reverse to show oldest first (like chat history)
         formatted_messages.reverse()
         
-        print(f"DEBUG: Returning {len(formatted_messages)} formatted messages")
+        print(f"DEBUG: Returning {len(formatted_messages)} formatted messages with threads and reactions")
         return formatted_messages
         
     except Exception as e:

@@ -30,6 +30,8 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onOpenFullChat }) => {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [newMessage, setNewMessage] = useState('');
   const [sendingMessage, setSendingMessage] = useState(false);
+  const [threadMessages, setThreadMessages] = useState<{ [parentId: string]: ChatMessage[] }>({});
+  const [loadingThread, setLoadingThread] = useState<string | null>(null);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -88,6 +90,13 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onOpenFullChat }) => {
       }
       
       setMessages(conversationMessages);
+      setThreadMessages({}); // Reset thread messages when switching conversation
+      
+      // Debug: Log message data to check for reactions and threads
+      console.log('Loaded messages:', conversationMessages);
+      conversationMessages.forEach(msg => {
+        console.log(`Message ${msg.id}: reactions=${JSON.stringify(msg.reactions)}, thread_count=${msg.thread_count}, reply_count=${msg.reply_count}`);
+      });
     } catch (error) {
       console.error('Failed to load conversation messages:', error);
       setMessages([]);
@@ -100,6 +109,20 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onOpenFullChat }) => {
     setShowList(true);
     setSelectedConversation(null);
     setMessages([]);
+  };
+
+  // Fetch thread messages for a parent message
+  const handleViewThread = async (parentMessageId: string) => {
+    setLoadingThread(parentMessageId);
+    try {
+      const result = await rocketChatService.getThreadMessages(parentMessageId);
+      setThreadMessages(prev => ({ ...prev, [parentMessageId]: result.messages }));
+    } catch (error) {
+      console.error('Failed to load thread messages:', error);
+      setThreadMessages(prev => ({ ...prev, [parentMessageId]: [] }));
+    } finally {
+      setLoadingThread(null);
+    }
   };
 
   const handleSendMessage = async () => {
@@ -391,7 +414,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onOpenFullChat }) => {
                 messages.map((message) => {
                   const isOwnMessage = message.user?.username === user?.email?.split('@')[0];
                   return (
-                    <div key={message.id} className={`flex ${isOwnMessage ? 'justify-end' : 'justify-start'}`}>
+                    <div key={message.id} className={`flex flex-col ${isOwnMessage ? 'items-end' : 'items-start'}`}>
                       <div className={`max-w-[80%] ${isOwnMessage ? 'order-2' : 'order-1'}`}>
                         <div className={`p-3 rounded-lg ${
                           isOwnMessage 
@@ -419,10 +442,61 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onOpenFullChat }) => {
                               <div className={`text-xs mt-1 opacity-70`}>
                                 {formatTimestamp(message.timestamp)}
                               </div>
+                              {/* Reactions UI */}
+                              {message.reactions && Object.keys(message.reactions).length > 0 && (
+                                <div className="flex gap-2 mt-2">
+                                  {Object.entries(message.reactions).map(([emoji, users]) => (
+                                    <span key={emoji} className="px-2 py-1 rounded bg-gray-200 text-xs">
+                                      {emoji} {users.length}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                              {/* Thread replies UI */}
+                              {(message.thread_count || message.reply_count) > 0 && (
+                                <div className="mt-2">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => handleViewThread(message.id)}
+                                    disabled={loadingThread === message.id}
+                                  >
+                                    {loadingThread === message.id ? 'Loading thread...' : `View thread (${message.thread_count || message.reply_count})`}
+                                  </Button>
+                                </div>
+                              )}
                             </div>
                           </div>
                         </div>
                       </div>
+                      {/* Thread messages display */}
+                      {threadMessages[message.id] && threadMessages[message.id].length > 0 && (
+                        <div className="ml-8 mt-2 border-l-2 border-blue-200 pl-4">
+                          {threadMessages[message.id].map((threadMsg) => (
+                            <div key={threadMsg.id} className="mb-2">
+                              <div className="text-xs font-medium opacity-70">
+                                {threadMsg.user?.name || threadMsg.user?.username}
+                              </div>
+                              <div className="text-sm break-words">
+                                {threadMsg.content || threadMsg.text || 'No content'}
+                              </div>
+                              <div className="text-xs mt-1 opacity-70">
+                                {formatTimestamp(threadMsg.timestamp)}
+                              </div>
+                              {/* Thread message reactions */}
+                              {threadMsg.reactions && Object.keys(threadMsg.reactions).length > 0 && (
+                                <div className="flex gap-2 mt-1">
+                                  {Object.entries(threadMsg.reactions).map(([emoji, users]) => (
+                                    <span key={emoji} className="px-2 py-1 rounded bg-gray-200 text-xs">
+                                      {emoji} {users.length}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   );
                 })

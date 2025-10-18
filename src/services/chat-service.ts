@@ -34,7 +34,7 @@ class ChatService {
   private apiUrl: string;
 
   constructor() {
-    this.apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+    this.apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8001';
   }
 
   // Convert backend message to frontend format
