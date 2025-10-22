@@ -6,6 +6,7 @@
     
     // Configuration
     const SOCIAL_HUB_URL = 'http://localhost:8080/feed';
+    const ROCKET_CHAT_URL = 'http://10.68.0.49:30082/home';
     
     // Wait for Rocket.Chat to fully load
     function waitForRocketChat() {

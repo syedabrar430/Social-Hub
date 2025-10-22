@@ -32,6 +32,10 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onOpenFullChat }) => {
   const [sendingMessage, setSendingMessage] = useState(false);
   const [threadMessages, setThreadMessages] = useState<{ [parentId: string]: ChatMessage[] }>({});
   const [loadingThread, setLoadingThread] = useState<string | null>(null);
+  const [openThreads, setOpenThreads] = useState<Set<string>>(new Set());
+  const [showReactionPicker, setShowReactionPicker] = useState<string | null>(null);
+  const [threadReplyText, setThreadReplyText] = useState<{ [parentId: string]: string }>({});
+  const [sendingThreadReply, setSendingThreadReply] = useState<string | null>(null);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -71,6 +75,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onOpenFullChat }) => {
   };
 
   const handleConversationSelect = async (conversation: ChatConversation) => {
+    console.log('Selecting conversation:', conversation);
     setSelectedConversation(conversation);
     setShowList(false);
     setLoadingMessages(true);
@@ -79,9 +84,11 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onOpenFullChat }) => {
       let conversationMessages: ChatMessage[] = [];
       
       if (conversation.type === 'direct_message' && conversation.other_user) {
+        console.log('Loading DM messages for:', conversation.other_user);
         // Load DM messages
         conversationMessages = await rocketChatService.getDirectMessageMessages(conversation.other_user);
       } else {
+        console.log('Loading channel messages for:', conversation.name || conversation.id);
         // Load channel messages
         conversationMessages = await rocketChatService.getRocketChatChannelMessages(
           conversation.name || conversation.id,
@@ -89,6 +96,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onOpenFullChat }) => {
         );
       }
       
+      console.log('Loaded messages count:', conversationMessages.length);
       setMessages(conversationMessages);
       setThreadMessages({}); // Reset thread messages when switching conversation
       
@@ -117,6 +125,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onOpenFullChat }) => {
     try {
       const result = await rocketChatService.getThreadMessages(parentMessageId);
       setThreadMessages(prev => ({ ...prev, [parentMessageId]: result.messages }));
+      setOpenThreads(prev => new Set([...prev, parentMessageId]));
     } catch (error) {
       console.error('Failed to load thread messages:', error);
       setThreadMessages(prev => ({ ...prev, [parentMessageId]: [] }));
@@ -125,21 +134,88 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onOpenFullChat }) => {
     }
   };
 
+  const handleCloseThread = (parentMessageId: string) => {
+    setOpenThreads(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(parentMessageId);
+      return newSet;
+    });
+  };
+
+  const handleReaction = async (messageId: string, emoji: string) => {
+    try {
+      await rocketChatService.addReaction(messageId, emoji);
+      // Reload messages to show the reaction
+      if (selectedConversation) {
+        if (selectedConversation.type === 'direct_message' && selectedConversation.other_user) {
+          const updatedMessages = await rocketChatService.getDirectMessageMessages(selectedConversation.other_user);
+          setMessages(updatedMessages);
+        } else {
+          const updatedMessages = await rocketChatService.getRocketChatChannelMessages(
+            selectedConversation.name || selectedConversation.id,
+            selectedConversation.type === 'private_group' ? 'group' : 'channel'
+          );
+          setMessages(updatedMessages);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to add reaction:', error);
+    }
+  };
+
+  const handleReactionClick = (messageId: string) => {
+    setShowReactionPicker(showReactionPicker === messageId ? null : messageId);
+  };
+
+  const handleReplyInThread = (parentMessageId: string) => {
+    setOpenThreads(prev => new Set([...prev, parentMessageId]));
+    // Focus the thread input field
+    setTimeout(() => {
+      const input = document.getElementById(`thread-input-${parentMessageId}`);
+      if (input) {
+        input.focus();
+      }
+    }, 100);
+  };
+
+  const handleSendThreadReply = async (parentMessageId: string) => {
+    const replyText = threadReplyText[parentMessageId];
+    if (!replyText?.trim() || sendingThreadReply === parentMessageId) return;
+
+    console.log('DEBUG: Sending thread reply:', { parentMessageId, replyText, selectedConversation });
+    setSendingThreadReply(parentMessageId);
+    try {
+      await rocketChatService.sendThreadMessage(selectedConversation?.name || selectedConversation?.id || '', parentMessageId, replyText);
+      setThreadReplyText(prev => ({ ...prev, [parentMessageId]: '' }));
+      
+      // Reload thread messages
+      const result = await rocketChatService.getThreadMessages(parentMessageId);
+      setThreadMessages(prev => ({ ...prev, [parentMessageId]: result.messages }));
+    } catch (error) {
+      console.error('Failed to send thread reply:', error);
+    } finally {
+      setSendingThreadReply(null);
+    }
+  };
+
   const handleSendMessage = async () => {
     if (!newMessage.trim() || sendingMessage || !selectedConversation) return;
 
     const messageContent = newMessage;
+    console.log('DEBUG: Sending message:', { messageContent, selectedConversation });
     setNewMessage('');
     setSendingMessage(true);
 
     try {
       // Send to channel or DM based on type
       if (selectedConversation.type === 'direct_message' && selectedConversation.other_user) {
+        console.log('DEBUG: Sending DM to:', selectedConversation.other_user);
         await rocketChatService.sendDirectMessage(selectedConversation.other_user, messageContent);
         // Reload DM messages
         const updatedMessages = await rocketChatService.getDirectMessageMessages(selectedConversation.other_user);
         setMessages(updatedMessages);
       } else {
+        console.log('DEBUG: Sending channel message to:', selectedConversation.name || selectedConversation.id);
         await rocketChatService.sendRocketChatChannelMessage(
           selectedConversation.name || selectedConversation.id,
           messageContent,
@@ -411,7 +487,9 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onOpenFullChat }) => {
                   </div>
                 </div>
               ) : (
-                messages.map((message) => {
+                (() => {
+                  console.log('Rendering messages:', messages.length, messages);
+                  return messages.map((message) => {
                   const isOwnMessage = message.user?.username === user?.email?.split('@')[0];
                   return (
                     <div key={message.id} className={`flex flex-col ${isOwnMessage ? 'items-end' : 'items-start'}`}>
@@ -442,24 +520,76 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onOpenFullChat }) => {
                               <div className={`text-xs mt-1 opacity-70`}>
                                 {formatTimestamp(message.timestamp)}
                               </div>
-                              {/* Reactions UI */}
+                              {/* Message reactions */}
                               {message.reactions && Object.keys(message.reactions).length > 0 && (
                                 <div className="flex gap-2 mt-2">
                                   {Object.entries(message.reactions).map(([emoji, users]) => (
-                                    <span key={emoji} className="px-2 py-1 rounded bg-gray-200 text-xs">
+                                    <button
+                                      key={emoji}
+                                      className="px-2 py-1 rounded bg-gray-200 text-xs hover:bg-gray-300 cursor-pointer"
+                                      onClick={() => handleReaction(message.id, emoji)}
+                                    >
                                       {emoji} {users.length}
-                                    </span>
+                                    </button>
                                   ))}
                                 </div>
                               )}
+                              
+                              {/* Action Buttons */}
+                              <div className="mt-2 flex gap-1">
+                                {/* Reaction Button */}
+                                <div className="relative">
+                                  <button
+                                    className="flex items-center justify-center w-6 h-6 rounded bg-gray-100 hover:bg-gray-200 text-gray-600"
+                                    onClick={() => handleReactionClick(message.id)}
+                                    title="Add reaction"
+                                  >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                  </button>
+                                  
+                                  {/* Reaction Picker */}
+                                  {showReactionPicker === message.id && (
+                                    <div className={`absolute top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-2 z-10 ${
+                                      isOwnMessage ? 'right-0' : 'left-0'
+                                    }`}>
+                                      <div className="flex gap-1">
+                                        {['👍', '❤️', '😂', '😮', '😢', '😡'].map((emoji) => (
+                                          <button
+                                            key={emoji}
+                                            className="text-lg hover:bg-gray-100 rounded p-1"
+                                            onClick={() => handleReaction(message.id, emoji)}
+                                          >
+                                            {emoji}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Reply in Thread Button */}
+                                <button
+                                  className="flex items-center justify-center w-6 h-6 rounded bg-gray-100 hover:bg-gray-200 text-gray-600"
+                                  onClick={() => handleReplyInThread(message.id)}
+                                  title="Reply in thread"
+                                >
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                                  </svg>
+                                </button>
+                              </div>
+                              
                               {/* Thread replies UI */}
-                              {(message.thread_count || message.reply_count) > 0 && (
+                              {(message.thread_count || message.reply_count) > 0 && !openThreads.has(message.id) && (
                                 <div className="mt-2">
                                   <Button
                                     size="sm"
                                     variant="outline"
                                     onClick={() => handleViewThread(message.id)}
                                     disabled={loadingThread === message.id}
+                                    className="bg-white border-gray-300 text-gray-700 hover:bg-gray-50"
                                   >
                                     {loadingThread === message.id ? 'Loading thread...' : `View thread (${message.thread_count || message.reply_count})`}
                                   </Button>
@@ -469,38 +599,89 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onOpenFullChat }) => {
                           </div>
                         </div>
                       </div>
-                      {/* Thread messages display */}
-                      {threadMessages[message.id] && threadMessages[message.id].length > 0 && (
-                        <div className="ml-8 mt-2 border-l-2 border-blue-200 pl-4">
-                          {threadMessages[message.id].map((threadMsg) => (
-                            <div key={threadMsg.id} className="mb-2">
-                              <div className="text-xs font-medium opacity-70">
-                                {threadMsg.user?.name || threadMsg.user?.username}
-                              </div>
-                              <div className="text-sm break-words">
-                                {threadMsg.content || threadMsg.text || 'No content'}
-                              </div>
-                              <div className="text-xs mt-1 opacity-70">
-                                {formatTimestamp(threadMsg.timestamp)}
-                              </div>
-                              {/* Thread message reactions */}
-                              {threadMsg.reactions && Object.keys(threadMsg.reactions).length > 0 && (
-                                <div className="flex gap-2 mt-1">
-                                  {Object.entries(threadMsg.reactions).map(([emoji, users]) => (
-                                    <span key={emoji} className="px-2 py-1 rounded bg-gray-200 text-xs">
-                                      {emoji} {users.length}
-                                    </span>
-                                  ))}
+                      
+                      {/* Thread messages display - positioned below THIS specific message */}
+                      {openThreads.has(message.id) && (
+                        <div className="mt-2 ml-8">
+                          <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                            <div className="flex items-center justify-between mb-3">
+                              <h4 className="text-sm font-medium text-gray-700">Thread replies</h4>
+                              <button
+                                onClick={() => handleCloseThread(message.id)}
+                                className="text-gray-500 hover:text-gray-700 text-sm"
+                                title="Close thread"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                            
+                            {/* Thread Messages */}
+                            <div className="space-y-3">
+                              {threadMessages[message.id] && threadMessages[message.id].length > 0 ? (
+                                threadMessages[message.id].map((threadMsg) => (
+                                  <div key={threadMsg.id} className="border-l-2 border-blue-200 pl-3">
+                                    <div className="text-xs font-medium text-gray-600">
+                                      {threadMsg.user?.username || threadMsg.user?.name}
+                                    </div>
+                                    <div className="text-sm text-gray-800 mt-1">
+                                      {threadMsg.content || threadMsg.text || 'No content'}
+                                    </div>
+                                    <div className="text-xs text-gray-500 mt-1">
+                                      {formatTimestamp(threadMsg.timestamp)}
+                                    </div>
+                                    {/* Thread message reactions */}
+                                    {threadMsg.reactions && Object.keys(threadMsg.reactions).length > 0 && (
+                                      <div className="flex gap-2 mt-1">
+                                        {Object.entries(threadMsg.reactions).map(([emoji, users]) => (
+                                          <span key={emoji} className="px-2 py-1 rounded bg-gray-200 text-xs">
+                                            {emoji} {users.length}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                ))
+                              ) : (
+                                <div className="text-sm text-gray-500 italic">
+                                  No replies yet. Be the first to reply!
                                 </div>
                               )}
                             </div>
-                          ))}
+                            
+                            {/* Thread Reply Input */}
+                            <div className="mt-3 pt-3 border-t border-gray-200">
+                              <div className="flex gap-2">
+                                <Input
+                                  id={`thread-input-${message.id}`}
+                                  value={threadReplyText[message.id] || ''}
+                                  onChange={(e) => setThreadReplyText(prev => ({ ...prev, [message.id]: e.target.value }))}
+                                  placeholder="Reply in thread..."
+                                  className="flex-1 text-sm"
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && !e.shiftKey) {
+                                      e.preventDefault();
+                                      handleSendThreadReply(message.id);
+                                    }
+                                  }}
+                                />
+                                <Button 
+                                  onClick={() => handleSendThreadReply(message.id)}
+                                  disabled={!threadReplyText[message.id]?.trim() || sendingThreadReply === message.id}
+                                  size="sm"
+                                >
+                                  {sendingThreadReply === message.id ? 'Sending...' : 'Reply'}
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
                         </div>
                       )}
                     </div>
                   );
-                })
+                  });
+                })()
               )}
+              
               <div ref={messagesEndRef} />
             </div>
           )}

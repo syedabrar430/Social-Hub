@@ -1,4 +1,4 @@
-const API_BASE_URL = 'http://localhost:8001';
+const API_BASE_URL = 'http://localhost:8000';
 
 export interface ChatBootstrapResponse {
   rocket_username: string;
@@ -374,13 +374,13 @@ class ChatService {
   }
 
   // Send a message in a thread
-  async sendThreadMessage(channelName: string, parentMessageId: string, text: string): Promise<{ message: ChatMessage }> {
-    return this.request<{ message: ChatMessage }>('/chat/send-thread-message', {
+  async sendThreadMessage(channelName: string, parentMessageId: string, text: string): Promise<{ success: boolean; message: string }> {
+    return this.request<{ success: boolean; message: string }>('/api/rocket-chat/send-thread-message', {
       method: 'POST',
       body: JSON.stringify({ 
-        channel_name: channelName, 
-        parent_message_id: parentMessageId,
-        text 
+        roomId: channelName, 
+        threadId: parentMessageId,
+        content: text 
       }),
     });
   }

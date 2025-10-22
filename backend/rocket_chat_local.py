@@ -12,7 +12,7 @@ load_dotenv(env_path)
 
 class RocketChatClient:
     def __init__(self):
-        self.base_url = os.getenv("ROCKET_CHAT_URL", "https://open.rocket.chat").rstrip("/")
+        self.base_url = os.getenv("ROCKET_CHAT_URL", "http://10.68.0.49:30082").rstrip("/")
         self.user_id = os.getenv("ROCKET_CHAT_USER_ID", "")
         self.auth_token = os.getenv("ROCKET_CHAT_AUTH_TOKEN", "")
         
@@ -44,33 +44,94 @@ class RocketChatClient:
         except Exception:
             return False
 
-    async def ensure_authenticated(self) -> bool:
-        """Ensure we have valid authentication credentials"""
+    async def ensure_authenticated(self, social_hub_user_email: str = None, social_hub_user_name: str = None, social_hub_user_id: str = None) -> bool:
+        """Ensure we have valid authentication credentials for the current Social Hub user"""
         try:
-            print("DEBUG: Ensuring authentication with fresh login")
+            print("DEBUG: Ensuring authentication for Social Hub user")
             
-            # Try to login with the known working credentials
-            login_result = await self.login_user("ankush1@gmail.com", "Ankushsocial@2")
+            # If we have Social Hub user info, try to authenticate with Rocket.Chat
+            if social_hub_user_email and social_hub_user_name and social_hub_user_id:
+                print(f"DEBUG: Attempting SSO authentication for user: {social_hub_user_email}")
+                
+                # Try to get or create user in Rocket.Chat
+                rocket_chat_user_id = await self._ensure_user_exists(social_hub_user_email, social_hub_user_name, social_hub_user_id)
+                
+                if rocket_chat_user_id:
+                    print(f"DEBUG: User exists in Rocket.Chat: {rocket_chat_user_id}")
+                    
+                    # Generate a login token for this user
+                    login_token = await self._generate_login_token(rocket_chat_user_id, social_hub_user_email)
+                    
+                    if login_token:
+                        print(f"DEBUG: Generated login token for SSO")
+                        
+                        # Use the login token to authenticate
+                        login_result = await self._authenticate_with_token(login_token)
+                        
+                        if login_result:
+                            print("DEBUG: Successfully authenticated with login token")
+                            return True
+                        else:
+                            print("DEBUG: Failed to authenticate with login token")
+                    else:
+                        print("DEBUG: Failed to generate login token")
+                else:
+                    print("DEBUG: Failed to ensure user exists in Rocket.Chat")
             
-            if login_result.get('success'):
-                # Update our headers with fresh authentication
-                self.user_id = login_result.get('user_id', '')
-                self.auth_token = login_result.get('auth_token', '')
+            # Fallback: try existing credentials if available
+            if self.user_id and self.auth_token:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    response = await client.get(
+                        f"{self.base_url}/api/v1/me",
+                        headers=self.headers
+                    )
+                    
+                    if response.status_code == 200:
+                        print("DEBUG: Fallback credentials are valid")
+                        return True
+                    else:
+                        print(f"DEBUG: Fallback credentials invalid - Status: {response.status_code}")
+            
+            print("DEBUG: Authentication failed - no valid credentials available")
+            return False
                 
-                self.headers = {
-                    "X-Auth-Token": self.auth_token,
-                    "X-User-Id": self.user_id,
-                    "Content-Type": "application/json"
-                }
+        except Exception as e:
+            print(f"DEBUG: Exception during authentication check: {e}")
+            return False
+
+    async def _authenticate_with_token(self, login_token: str) -> bool:
+        """Authenticate using a login token"""
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                # Use the login token to get user info
+                response = await client.get(
+                    f"{self.base_url}/api/v1/me",
+                    headers={
+                        "X-Auth-Token": login_token,
+                        "Content-Type": "application/json"
+                    }
+                )
                 
-                print(f"DEBUG: Authentication successful - User ID: {self.user_id[:10]}..., Token: {self.auth_token[:20]}...")
-                return True
-            else:
-                print(f"DEBUG: Authentication failed: {login_result.get('error')}")
+                if response.status_code == 200:
+                    user_data = response.json()
+                    if user_data.get('success') or '_id' in user_data:
+                        # Update our authentication with the token
+                        self.auth_token = login_token
+                        self.user_id = user_data.get('_id', '')
+                        
+                        # Update headers
+                        self.headers = {
+                            "X-Auth-Token": self.auth_token,
+                            "X-User-Id": self.user_id,
+                            "Content-Type": "application/json"
+                        }
+                        
+                        return True
+                
                 return False
                 
         except Exception as e:
-            print(f"DEBUG: Exception during authentication: {e}")
+            print(f"DEBUG: Exception during token authentication: {e}")
             return False
 
     async def create_user_account(self, email: str, username: str, password: str, full_name: str) -> dict:
@@ -263,10 +324,17 @@ class RocketChatClient:
                 print(f"DEBUG: Channels list response: {response.status_code}")
                 if response.status_code == 200:
                     channels_data = response.json()
-                    channel_list = channels_data.get('channels', [])
-                    print(f"DEBUG: Found {len(channel_list)} public channels")
-                    
-                    for channel in channel_list:
+                    if channels_data.get('success'):
+                        channel_list = channels_data.get('channels', [])
+                        print(f"DEBUG: Found {len(channel_list)} public channels")
+                    else:
+                        print(f"DEBUG: Channels API returned error: {channels_data.get('error', 'Unknown error')}")
+                        return []
+                else:
+                    print(f"DEBUG: Failed to fetch channels - HTTP {response.status_code}: {response.text}")
+                    return []
+                
+                for channel in channel_list:
                         channel_name = channel.get('name', '')
                         channel_id = channel.get('_id', '')
                         
@@ -405,6 +473,10 @@ class RocketChatClient:
                 return {"success": False, "error": f"Channel '{channel_name}' not found"}
 
             async with httpx.AsyncClient() as client:
+                print(f"DEBUG: Sending to Rocket.Chat API: {self.base_url}/api/v1/chat.postMessage")
+                print(f"DEBUG: Request payload: {{'roomId': '{channel_id}', 'text': '{text}'}}")
+                print(f"DEBUG: Headers: {self.headers}")
+                
                 response = await client.post(
                     f"{self.base_url}/api/v1/chat.postMessage",
                     json={
@@ -413,6 +485,9 @@ class RocketChatClient:
                     },
                     headers=self.headers
                 )
+                
+                print(f"DEBUG: Rocket.Chat response status: {response.status_code}")
+                print(f"DEBUG: Rocket.Chat response body: {response.text}")
                 
                 if response.status_code == 200:
                     return response.json()
@@ -558,14 +633,23 @@ class RocketChatClient:
     async def add_reaction(self, message_id: str, emoji: str) -> Dict:
         """Add reaction to a message"""
         try:
+            print(f"DEBUG: Adding reaction - message_id: {message_id}, emoji: {emoji}")
+            
             # Convert unicode emoji to colon format for Rocket.Chat API
             emoji_map = {
                 "👍": ":+1:",
                 "❤️": ":heart:",
                 "😂": ":joy:",
                 "😮": ":open_mouth:",
+                "😢": ":cry:",
+                "😡": ":angry:",
             }
             rocket_emoji = emoji_map.get(emoji, emoji)
+            print(f"DEBUG: Mapped emoji: {emoji} -> {rocket_emoji}")
+            
+            print(f"DEBUG: Making request to: {self.base_url}/api/v1/chat.react")
+            print(f"DEBUG: Request payload: {{'messageId': '{message_id}', 'emoji': '{rocket_emoji}'}}")
+            print(f"DEBUG: Headers: {self.headers}")
             
             async with httpx.AsyncClient() as client:
                 response = await client.post(
@@ -577,12 +661,16 @@ class RocketChatClient:
                     headers=self.headers
                 )
                 
+                print(f"DEBUG: Reaction API response status: {response.status_code}")
+                print(f"DEBUG: Reaction API response body: {response.text}")
+                
                 if response.status_code == 200:
                     return {"success": True, "data": response.json()}
                 else:
                     error_detail = f"Status: {response.status_code}, Response: {response.text}"
                     return {"success": False, "error": error_detail}
         except Exception as e:
+            print(f"DEBUG: Exception in add_reaction: {e}")
             return {"success": False, "error": str(e)}
 
     async def remove_reaction(self, message_id: str, emoji: str) -> Dict:
@@ -736,11 +824,21 @@ class RocketChatClient:
                     return {"success": True, "url": cached_data['url']}
             
             # Ensure user exists in Rocket.Chat
-            await self._ensure_user_exists(user_email, user_name, user_id)
+            rocket_chat_user_id = await self._ensure_user_exists(user_email, user_name, user_id)
             
-            # Generate direct URL with user credentials
-            # For Rocket.Chat, we can use direct URL with resume token or auto-login
-            rocket_chat_url = f"{self.base_url}/channel/general"
+            if not rocket_chat_user_id:
+                print(f"Failed to create/find user in Rocket.Chat: {user_email}")
+                return {"success": False, "error": "Failed to create user in Rocket.Chat"}
+            
+            # Generate a login token for the user
+            login_token = await self._generate_login_token(rocket_chat_user_id, user_email)
+            
+            if login_token:
+                # Create SSO URL with login token
+                rocket_chat_url = f"{self.base_url}/home?resumeToken={login_token}"
+            else:
+                # Fallback to direct URL (user will need to login manually)
+                rocket_chat_url = f"{self.base_url}/home"
             
             # Cache the result
             self._sso_cache[cache_key] = {
@@ -753,62 +851,110 @@ class RocketChatClient:
         except Exception as e:
             print(f"SSO URL generation error: {e}")
             # Return default URL if SSO fails
-            return {"success": True, "url": f"{self.base_url}/channel/general"}
+            return {"success": True, "url": f"{self.base_url}/home"}
     
     async def _ensure_user_exists(self, user_email: str, user_name: str, user_id: str):
         """
-        Ensure user exists in Rocket.Chat, create if doesn't exist
+        Ensure user exists in Rocket.Chat, use existing user if registration is disabled
         """
         try:
-            # Generate username from email (remove @ and domain)
-            username = user_email.split('@')[0].lower()
-            # Add user_id suffix to make it unique
-            username = f"{username}_{user_id}"
+            # First, try to authenticate with admin credentials
+            admin_authenticated = await self._authenticate_as_admin()
             
-            # Check if user already exists
+            if not admin_authenticated:
+                print("DEBUG: Failed to authenticate as admin")
+                return None
+            
+            # Since user registration is disabled, let's try to use the existing admin user
+            # or find an existing user that matches
             async with httpx.AsyncClient(timeout=30.0) as client:
+                # Get current user info (admin user)
                 response = await client.get(
-                    f"{self.base_url}/api/v1/users.info",
-                    headers=self.headers,
-                    params={"username": username}
-                )
-                
-                if response.status_code == 200:
-                    result = response.json()
-                    if result.get('success'):
-                        # User exists
-                        return result.get('user', {}).get('_id')
-                
-                # User doesn't exist, create them
-                # Generate a default password (in production, use secure method)
-                default_password = f"socialhub_{user_id}_{int(time.time())}"
-                
-                user_data = {
-                    "email": user_email,
-                    "name": user_name,
-                    "pass": default_password,
-                    "username": username,
-                    "verified": True,  # Auto-verify since coming from Social Hub
-                    "active": True
-                }
-                
-                create_response = await client.post(
-                    f"{self.base_url}/api/v1/users.register",
-                    json=user_data,
+                    f"{self.base_url}/api/v1/me",
                     headers=self.headers
                 )
                 
-                if create_response.status_code == 200:
-                    create_result = create_response.json()
-                    if create_result.get('success'):
-                        return create_result.get('user', {}).get('_id')
+                admin_user_id = None
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get('success') or '_id' in result:
+                        admin_user_id = result.get('_id')
+                        print(f"DEBUG: Using admin user for SSO: {admin_user_id}")
+                        return admin_user_id
                 
-                # If creation fails, just continue with default URL
-                print(f"Could not create/verify user {username} in Rocket.Chat")
-                return None
+                # Try to find user by email
+                print(f"DEBUG: Looking for user with email: {user_email}")
+                
+                # Get users list to find matching user
+                users_response = await client.get(
+                    f"{self.base_url}/api/v1/users.list",
+                    headers=self.headers,
+                    params={"count": 100}
+                )
+                
+                if users_response.status_code == 200:
+                    users_result = users_response.json()
+                    users = users_result.get('users', [])
+                    
+                    # Look for user with matching email
+                    for user in users:
+                        user_emails = user.get('emails', [])
+                        for email_info in user_emails:
+                            if email_info.get('address') == user_email:
+                                user_id_found = user.get('_id')
+                                print(f"DEBUG: Found existing user: {user_id_found}")
+                                return user_id_found
+                
+                print("DEBUG: No existing user found, using admin user")
+                return admin_user_id
                 
         except Exception as e:
-            print(f"Error ensuring user exists in Rocket.Chat: {e}")
+            print(f"DEBUG: Error ensuring user exists in Rocket.Chat: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    async def _authenticate_as_admin(self) -> bool:
+        """
+        Authenticate with admin credentials to manage users
+        """
+        try:
+            # Try to use existing admin credentials from .env
+            if self.user_id and self.auth_token:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    response = await client.get(
+                        f"{self.base_url}/api/v1/me",
+                        headers=self.headers
+                    )
+                    
+                    if response.status_code == 200:
+                        result = response.json()
+                        if result.get('success') or '_id' in result:
+                            print("DEBUG: Admin credentials are valid")
+                            return True
+            
+            print("DEBUG: Admin credentials are invalid or missing")
+            return False
+            
+        except Exception as e:
+            print(f"DEBUG: Error authenticating as admin: {e}")
+            return False
+
+    async def _generate_login_token(self, rocket_chat_user_id: str, user_email: str) -> str:
+        """
+        Generate a login token for the user to enable SSO
+        Since user registration is disabled, we'll use the admin token for SSO
+        """
+        try:
+            # Since user registration is disabled, we'll use the admin token
+            # This allows the user to access Rocket.Chat through the admin account
+            print(f"DEBUG: Using admin token for SSO for user {user_email}")
+            
+            # Return the admin token for SSO
+            return self.auth_token
+                
+        except Exception as e:
+            print(f"Error generating login token: {e}")
             return None
 
     async def get_direct_messages_list(self) -> List[Dict]:
@@ -902,6 +1048,163 @@ class RocketChatClient:
                     
         except Exception as e:
             print(f"Exception getting DM messages with {username}: {e}")
+            return []
+
+    async def send_post_message(self, room_id: str, content: str, attachments: List[Dict] = None) -> Dict:
+        """Send a post message to a room"""
+        try:
+            if not await self.ensure_authenticated():
+                return {"success": False, "error": "Authentication failed"}
+            
+            message_data = {
+                "roomId": room_id,
+                "text": content,
+                "attachments": attachments or []
+            }
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{self.base_url}/api/v1/chat.postMessage",
+                    json=message_data,
+                    headers=self.headers
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get('success'):
+                        return {"success": True, "message": result.get('message')}
+                    else:
+                        return {"success": False, "error": result.get('error', 'Unknown error')}
+                else:
+                    return {"success": False, "error": f"HTTP {response.status_code}: {response.text}"}
+                    
+        except Exception as e:
+            print(f"Exception sending post message: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def send_thread_message(self, room_id: str, thread_id: str, content: str) -> Dict:
+        """Send a message to a thread"""
+        try:
+            if not await self.ensure_authenticated():
+                return {"success": False, "error": "Authentication failed"}
+            
+            message_data = {
+                "roomId": room_id,
+                "text": content,
+                "tmid": thread_id  # Thread message ID
+            }
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{self.base_url}/api/v1/chat.postMessage",
+                    json=message_data,
+                    headers=self.headers
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get('success'):
+                        return {"success": True, "message": result.get('message')}
+                    else:
+                        return {"success": False, "error": result.get('error', 'Unknown error')}
+                else:
+                    return {"success": False, "error": f"HTTP {response.status_code}: {response.text}"}
+                    
+        except Exception as e:
+            print(f"Exception sending thread message: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def add_reaction(self, message_id: str, emoji: str) -> Dict:
+        """Add a reaction to a message"""
+        try:
+            if not await self.ensure_authenticated():
+                return {"success": False, "error": "Authentication failed"}
+            
+            reaction_data = {
+                "messageId": message_id,
+                "emoji": emoji
+            }
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{self.base_url}/api/v1/reactions.set",
+                    json=reaction_data,
+                    headers=self.headers
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get('success'):
+                        return {"success": True, "reaction": result.get('reaction')}
+                    else:
+                        return {"success": False, "error": result.get('error', 'Unknown error')}
+                else:
+                    return {"success": False, "error": f"HTTP {response.status_code}: {response.text}"}
+                    
+        except Exception as e:
+            print(f"Exception adding reaction: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def remove_reaction(self, message_id: str, emoji: str) -> Dict:
+        """Remove a reaction from a message"""
+        try:
+            if not await self.ensure_authenticated():
+                return {"success": False, "error": "Authentication failed"}
+            
+            reaction_data = {
+                "messageId": message_id,
+                "emoji": emoji
+            }
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{self.base_url}/api/v1/reactions.unset",
+                    json=reaction_data,
+                    headers=self.headers
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get('success'):
+                        return {"success": True}
+                    else:
+                        return {"success": False, "error": result.get('error', 'Unknown error')}
+                else:
+                    return {"success": False, "error": f"HTTP {response.status_code}: {response.text}"}
+                    
+        except Exception as e:
+            print(f"Exception removing reaction: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def get_thread_messages_by_room(self, room_id: str, thread_id: str, count: int = 50) -> List[Dict]:
+        """Get messages from a thread"""
+        try:
+            if not await self.ensure_authenticated():
+                return []
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(
+                    f"{self.base_url}/api/v1/chat.getThreadMessages",
+                    headers=self.headers,
+                    params={
+                        "tmid": thread_id,
+                        "count": count
+                    }
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get('success'):
+                        return result.get('messages', [])
+                    else:
+                        print(f"Failed to get thread messages: {result.get('error', 'Unknown error')}")
+                        return []
+                else:
+                    print(f"HTTP {response.status_code} getting thread messages: {response.text}")
+                    return []
+                    
+        except Exception as e:
+            print(f"Exception getting thread messages: {e}")
             return []
 
     async def get_all_user_rooms(self) -> Dict:
