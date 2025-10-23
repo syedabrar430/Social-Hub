@@ -1,6 +1,4 @@
-#!/bin/sh
-'''exec' "/home/kshitij/Downloads/Social Hub/Social-Hub/backend/venv/bin/python3.12" "$0" "$@"
-' '''
+#!/Users/ankushchhabra/Downloads/Social-Hub/backend/venv/bin/python3.13
 # -*- coding: utf-8 -*-
 import re
 import sys

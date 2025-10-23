@@ -1,8 +1,8 @@
 import React from 'react';
-import MessagesWidget from '@/components/chat/MessagesWidget';
+import EnhancedMessagesWidget from '@/components/chat/EnhancedMessagesWidget';
 
 const Messages: React.FC = () => {
-  return <MessagesWidget />;
+  return <EnhancedMessagesWidget />;
 };
 
 export default Messages;

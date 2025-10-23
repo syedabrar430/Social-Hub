@@ -21,11 +21,17 @@ def get_user_by_google_id(db: Session, google_id: str) -> Optional[User]:
 def create_user(db: Session, user: UserRegistration) -> User:
     """Create a new user"""
     hashed_password = get_password_hash(user.password)
+    # Generate Rocket.Chat username from email
+    rocket_chat_username = user.email.split('@')[0]
+    
     db_user = User(
         full_name=user.full_name,
         email=user.email,
         hashed_password=hashed_password,
-        auth_provider=AuthProvider.LOCAL
+        auth_provider=AuthProvider.LOCAL,
+        # Store Rocket.Chat credentials for SSO
+        rocket_chat_username=rocket_chat_username,
+        rocket_chat_password=user.password  # Store plain password for Rocket.Chat login
     )
     db.add(db_user)
     db.commit()

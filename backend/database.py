@@ -36,6 +36,10 @@ class User(Base):
     auth_provider = Column(Enum(AuthProvider), default=AuthProvider.LOCAL)  # Track auth method
     profile_picture_url = Column(String(500), nullable=True)  # For Google profile pics
     
+    # Rocket.Chat credentials for SSO
+    rocket_chat_username = Column(String(255), nullable=True)  # Rocket.Chat username
+    rocket_chat_password = Column(String(255), nullable=True)  # Rocket.Chat password (same as Social Hub)
+    
     # Additional profile fields
     education_school = Column(String(255), nullable=True)  # School/University
     education_degree = Column(String(255), nullable=True)  # Degree/Field of study

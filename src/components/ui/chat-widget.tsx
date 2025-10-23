@@ -57,6 +57,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onOpenFullChat }) => {
   }, [isOpen, isAuthenticated, showList]);
 
   const loadChannelsAndDMs = async () => {
+    console.log('🔄 Loading channels, groups and DMs...');
     setLoadingChannels(true);
     setLoadingGroups(true);
     setLoadingDMs(true);
@@ -64,14 +65,17 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onOpenFullChat }) => {
     try {
       // Load channels with messages
       const channelsData = await rocketChatService.getChannelsWithMessages();
+      console.log('📺 Channels loaded:', channelsData);
       setChannels(channelsData);
       
       // Load groups with messages
       const groupsData = await rocketChatService.getGroupsWithMessages();
+      console.log('👥 Groups loaded:', groupsData);
       setGroups(groupsData);
       
       // Load direct messages
       const dmsData = await rocketChatService.getDirectMessagesWithMessages();
+      console.log('💬 DMs loaded:', dmsData);
       setDirectMessages(dmsData);
     } catch (error) {
       console.error('Failed to load channels, groups and DMs:', error);
@@ -266,20 +270,24 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onOpenFullChat }) => {
 
   useEffect(() => {
     let isMounted = true;
+    console.log('🔍 DM Filter Effect - directMessages:', directMessages);
     if (directMessages.length > 0) {
       setLoadingFilteredDMs(true);
       Promise.all(
         directMessages.map(async (dm) => {
-          const messages = await rocketChatService.getDirectMessageMessages(dm.other_user || dm.name);
-          return messages.length > 0 ? dm : null;
+          // Return all DMs, not just those with messages
+          console.log('📱 Processing DM:', dm);
+          return dm;
         })
       ).then(results => {
         if (isMounted) {
+          console.log('✅ Filtered DMs result:', results);
           setFilteredDMs(results.filter(Boolean) as ChatConversation[]);
           setLoadingFilteredDMs(false);
         }
       });
     } else {
+      console.log('❌ No direct messages to filter');
       setFilteredDMs([]);
       setLoadingFilteredDMs(false);
     }

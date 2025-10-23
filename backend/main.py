@@ -788,9 +788,34 @@ async def get_dm_messages(
 async def get_dm_list(current_user: User = Depends(get_current_user)):
     """Get all DM conversations"""
     try:
+        print(f"DEBUG: Fetching DM list for user: {current_user.email}")
+        
+        # Test connection first
+        connection_ok = await rocket_client.test_connection()
+        if not connection_ok:
+            raise HTTPException(
+                status_code=503, 
+                detail="Rocket.Chat server not accessible or authentication failed. Please check your credentials in .env file."
+            )
+        
+        # Ensure authentication with Social Hub user info
+        authenticated = await rocket_client.ensure_authenticated(
+            social_hub_user_email=current_user.email,
+            social_hub_user_name=current_user.full_name,
+            social_hub_user_id=str(current_user.id)
+        )
+        
+        if not authenticated:
+            raise HTTPException(
+                status_code=401, 
+                detail="Failed to authenticate with Rocket.Chat. Please check your credentials."
+            )
+        
         # Use the same structured response as channels endpoint
         rooms = await rocket_client.get_all_user_rooms()
         return {"dms": rooms['direct_messages']}
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error getting DM list: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get DM list: {str(e)}")
@@ -798,17 +823,28 @@ async def get_dm_list(current_user: User = Depends(get_current_user)):
 @app.post("/api/rocket-chat/send-dm")
 async def send_dm_message(
     message_data: dict,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """Send a direct message"""
     try:
+        print(f"DEBUG: Sending DM for user: {current_user.email}")
+        
         username = message_data.get("username")
         message = message_data.get("message")
         
         if not username or not message:
             raise HTTPException(status_code=400, detail="Username and message are required")
         
-        result = await rocket_client.send_direct_message(username, message)
+        # Get user-specific headers for API calls
+        user_headers = await rocket_client.get_user_headers(
+            social_hub_user_email=current_user.email,
+            social_hub_user_name=current_user.full_name,
+            social_hub_user_id=str(current_user.id),
+            db_session=db
+        )
+        
+        result = await rocket_client.send_direct_message(username, message, user_headers)
         
         if result.get("success"):
             return {"success": True, "message": "DM sent successfully"}
@@ -845,6 +881,14 @@ async def get_all_channels(current_user: User = Depends(get_current_user)):
     try:
         print(f"DEBUG: Fetching all channels for user: {current_user.email}")
         
+        # Test connection first
+        connection_ok = await rocket_client.test_connection()
+        if not connection_ok:
+            raise HTTPException(
+                status_code=503, 
+                detail="Rocket.Chat server not accessible or authentication failed. Please check your credentials in .env file."
+            )
+        
         # Ensure authentication with Social Hub user info
         authenticated = await rocket_client.ensure_authenticated(
             social_hub_user_email=current_user.email,
@@ -853,11 +897,16 @@ async def get_all_channels(current_user: User = Depends(get_current_user)):
         )
         
         if not authenticated:
-            raise HTTPException(status_code=401, detail="Failed to authenticate with Rocket.Chat")
+            raise HTTPException(
+                status_code=401, 
+                detail="Failed to authenticate with Rocket.Chat. Please check your credentials."
+            )
         
         rooms = await rocket_client.get_all_user_rooms()
         print(f"DEBUG: Returning rooms: {rooms}")
         return rooms
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error getting channels: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get channels: {str(e)}")
@@ -993,17 +1042,26 @@ async def send_message_to_any_channel(
     channel_identifier: str,
     message_data: dict,
     channel_type: str = "channel",
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """Send message to any channel or private group"""
     try:
         print(f"DEBUG: Sending message to {channel_type}: {channel_identifier} from user: {current_user.email}")
         print(f"DEBUG: Message data received: {message_data}")
         
+        # Get user-specific headers for API calls
+        user_headers = await rocket_client.get_user_headers(
+            social_hub_user_email=current_user.email,
+            social_hub_user_name=current_user.full_name,
+            social_hub_user_id=str(current_user.id),
+            db_session=db
+        )
+        
         # Send message to the specified channel
         message_text = message_data.get("text", message_data.get("content", ""))
         print(f"DEBUG: Extracted message text: '{message_text}'")
-        result = await rocket_client.send_message_to_channel(channel_identifier, message_text)
+        result = await rocket_client.send_message_to_channel(channel_identifier, message_text, user_headers)
         print(f"DEBUG: Send message result: {result}")
         
         if result.get('success'):
@@ -1094,10 +1152,13 @@ async def send_post_message(
 @app.post("/api/rocket-chat/send-thread-message")
 async def send_thread_message(
     message_data: dict,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """Send a message to a thread"""
     try:
+        print(f"DEBUG: Sending thread message for user: {current_user.email}")
+        
         room_id = message_data.get("roomId")
         thread_id = message_data.get("threadId")
         content = message_data.get("content")
@@ -1105,7 +1166,15 @@ async def send_thread_message(
         if not room_id or not thread_id or not content:
             raise HTTPException(status_code=400, detail="Room ID, thread ID, and content are required")
         
-        result = await rocket_client.send_thread_message(room_id, thread_id, content)
+        # Get user-specific headers for API calls
+        user_headers = await rocket_client.get_user_headers(
+            social_hub_user_email=current_user.email,
+            social_hub_user_name=current_user.full_name,
+            social_hub_user_id=str(current_user.id),
+            db_session=db
+        )
+        
+        result = await rocket_client.send_thread_message(room_id, thread_id, content, user_headers)
         
         if result.get('success'):
             return {"success": True, "message": "Thread message sent successfully"}
