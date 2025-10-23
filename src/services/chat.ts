@@ -140,9 +140,16 @@ class ChatService {
     return this.request<{ conversations: ChatConversation[] }>('/chat/conversations');
   }
 
-  // Get all Rocket.Chat channels
+  // Get all Rocket.Chat channels (only channels, not groups)
   async getRocketChatChannels(): Promise<ChatConversation[]> {
-    return this.request<ChatConversation[]>('/api/rocket-chat/channels');
+    const response = await this.request<{channels: ChatConversation[], groups: ChatConversation[], direct_messages: ChatConversation[]}>('/api/rocket-chat/channels');
+    return response.channels || [];
+  }
+
+  // Get all Rocket.Chat groups
+  async getRocketChatGroups(): Promise<ChatConversation[]> {
+    const response = await this.request<{channels: ChatConversation[], groups: ChatConversation[], direct_messages: ChatConversation[]}>('/api/rocket-chat/channels');
+    return response.groups || [];
   }
 
   // Get channels that have messages > 0
@@ -151,43 +158,24 @@ class ChatService {
       // First get all channels
       const allChannels = await this.getRocketChatChannels();
       
-      // Filter channels with messages by checking if they have a last_message or message count
-      const channelsWithMessages = allChannels.filter(channel => {
-        // Channel has messages if it has a last_message or unread_count > 0
-        return channel.last_message || (channel.unread_count && channel.unread_count > 0);
-      });
-      
-      // For channels that don't have clear message indicators, 
-      // we can do an additional check by trying to get their messages
-      const finalChannels: ChatConversation[] = [];
-      
-      for (const channel of channelsWithMessages) {
-        try {
-          // Try to get messages for this channel
-          const messages = await this.getRocketChatChannelMessages(
-            channel.name || channel.id, 
-            channel.type === 'private_group' ? 'group' : 'channel'
-          );
-          
-          // Only include if it has messages
-          if (messages && messages.length > 0) {
-            finalChannels.push({
-              ...channel,
-              unread_count: messages.length // Update with actual message count
-            });
-          }
-        } catch (error) {
-          console.warn(`Failed to check messages for channel ${channel.name}:`, error);
-          // If we can't check messages but it had a last_message, include it anyway
-          if (channel.last_message) {
-            finalChannels.push(channel);
-          }
-        }
-      }
-      
-      return finalChannels;
+      // Return all channels - let the frontend handle display logic
+      return allChannels;
     } catch (error) {
       console.error('Failed to get channels with messages:', error);
+      throw error;
+    }
+  }
+
+  // Get groups that have messages > 0
+  async getGroupsWithMessages(): Promise<ChatConversation[]> {
+    try {
+      // First get all groups
+      const allGroups = await this.getRocketChatGroups();
+      
+      // Return all groups - let the frontend handle display logic
+      return allGroups;
+    } catch (error) {
+      console.error('Failed to get groups with messages:', error);
       throw error;
     }
   }
@@ -250,34 +238,10 @@ class ChatService {
   // Get direct messages list
   async getDirectMessagesList(): Promise<ChatConversation[]> {
     try {
-      const response = await this.request<{ dms: DirectMessageRoom[] }>('/api/rocket-chat/dm-list');
+      const response = await this.request<{ dms: ChatConversation[] }>('/api/rocket-chat/dm-list');
       
-      // Transform DM list to ChatConversation format
-      const conversations: ChatConversation[] = response.dms.map(dm => ({
-        id: dm._id || dm.roomId || dm.name,
-        type: 'direct_message',
-        name: dm.name || dm.username || dm.usernames?.join(', '),
-        display_name: dm.usernames?.filter((username: string) => username !== dm.myUsername).join(', ') || dm.name,
-        description: `Direct message with ${dm.usernames?.filter((username: string) => username !== dm.myUsername).join(', ')}`,
-        is_private: true,
-        member_count: dm.usernames?.length || 2,
-        joined: true,
-        other_user: dm.usernames?.find((username: string) => username !== dm.myUsername),
-        unread_count: dm.unread || 0,
-        last_message: dm.lastMessage ? {
-          id: dm.lastMessage._id,
-          text: dm.lastMessage.msg,
-          user: {
-            id: dm.lastMessage.u?._id,
-            name: dm.lastMessage.u?.name || dm.lastMessage.u?.username,
-            username: dm.lastMessage.u?.username,
-            avatar: dm.lastMessage.u?.avatarUrl
-          },
-          timestamp: dm.lastMessage.ts
-        } : undefined
-      }));
-
-      return conversations;
+      // Return the DMs from the response
+      return response.dms || [];
     } catch (error) {
       console.error('Failed to get direct messages list:', error);
       throw error;
@@ -289,12 +253,8 @@ class ChatService {
     try {
       const allDMs = await this.getDirectMessagesList();
       
-      // Filter DMs with messages by checking if they have a last_message or unread_count > 0
-      const dmsWithMessages = allDMs.filter(dm => {
-        return dm.last_message || (dm.unread_count && dm.unread_count > 0);
-      });
-      
-      return dmsWithMessages;
+      // Return all DMs - let the frontend handle display logic
+      return allDMs;
     } catch (error) {
       console.error('Failed to get DMs with messages:', error);
       throw error;

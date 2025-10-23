@@ -13,7 +13,6 @@ import Profile from "./pages/Profile";
 import Notifications from "./pages/Notifications";
 import Messages from "./pages/Messages";
 import NotFound from "./pages/NotFound";
-import AuthTest from "@/components/AuthTest";
 
 const queryClient = new QueryClient();
 
@@ -48,7 +47,6 @@ const App = () => (
                 <Messages />
               </ProtectedRoute>
             } />
-            <Route path="/test-auth" element={<AuthTest />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>

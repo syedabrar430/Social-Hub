@@ -596,7 +596,6 @@ class RocketChatClient:
                     result = response.json()
                     if result.get('success'):
                         subscriptions = result.get('update', [])
-                        print(f"DEBUG: Found {len(subscriptions)} subscriptions")
                         
                         rooms = {
                             'channels': [],
@@ -610,23 +609,18 @@ class RocketChatClient:
                                 'id': sub.get('rid', ''),
                                 'name': sub.get('name', ''),
                                 'display_name': sub.get('fname', sub.get('name', '')),
-                                'unread_count': sub.get('unread', 0),
+                                'unread': sub.get('unread', 0),
                                 'type': room_type,
                                 'open': sub.get('open', False)
                             }
-                            
-                            print(f"DEBUG: Room type '{room_type}' - {room_info['name']}")
                             
                             if room_type == 'c':  # Public channel
                                 rooms['channels'].append(room_info)
                             elif room_type == 'p':  # Private group
                                 rooms['groups'].append(room_info)
                             elif room_type == 'd':  # Direct message
-                                # Add other_user field for DMs
-                                room_info['other_user'] = room_info['name']
                                 rooms['direct_messages'].append(room_info)
                         
-                        print(f"DEBUG: Final rooms structure: {rooms}")
                         return rooms
                     else:
                         return {'channels': [], 'groups': [], 'direct_messages': []}

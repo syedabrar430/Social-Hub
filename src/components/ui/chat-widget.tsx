@@ -20,11 +20,13 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onOpenFullChat }) => {
   const [activeTab, setActiveTab] = useState<'all' | 'groups' | 'dms'>('all');
   const [showList, setShowList] = useState(true);
   const [channels, setChannels] = useState<ChatConversation[]>([]);
+  const [groups, setGroups] = useState<ChatConversation[]>([]);
   const [directMessages, setDirectMessages] = useState<ChatConversation[]>([]);
   const [filteredDMs, setFilteredDMs] = useState<ChatConversation[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<ChatConversation | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loadingChannels, setLoadingChannels] = useState(false);
+  const [loadingGroups, setLoadingGroups] = useState(false);
   const [loadingDMs, setLoadingDMs] = useState(false);
   const [loadingFilteredDMs, setLoadingFilteredDMs] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
@@ -56,6 +58,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onOpenFullChat }) => {
 
   const loadChannelsAndDMs = async () => {
     setLoadingChannels(true);
+    setLoadingGroups(true);
     setLoadingDMs(true);
     
     try {
@@ -63,13 +66,18 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onOpenFullChat }) => {
       const channelsData = await rocketChatService.getChannelsWithMessages();
       setChannels(channelsData);
       
+      // Load groups with messages
+      const groupsData = await rocketChatService.getGroupsWithMessages();
+      setGroups(groupsData);
+      
       // Load direct messages
       const dmsData = await rocketChatService.getDirectMessagesWithMessages();
       setDirectMessages(dmsData);
     } catch (error) {
-      console.error('Failed to load channels and DMs:', error);
+      console.error('Failed to load channels, groups and DMs:', error);
     } finally {
       setLoadingChannels(false);
+      setLoadingGroups(false);
       setLoadingDMs(false);
     }
   };
@@ -309,7 +317,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onOpenFullChat }) => {
               </Button>
             )}
             <div className="font-semibold text-lg">
-              {showList ? 'Chats' : selectedConversation?.display_name || selectedConversation?.name || 'Chat'}
+              {showList ? 'Chats' : selectedConversation?.name || 'Chat'}
             </div>
           </div>
           <div className="flex items-center space-x-2">
@@ -384,45 +392,150 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onOpenFullChat }) => {
                   </div>
                 ) : (
                   <>
-                    {(activeTab === 'all' || activeTab === 'groups') && (
+                    {activeTab === 'all' && (
                       <>
-                        {loadingChannels ? (
+                        {loadingChannels || loadingGroups ? (
                           <div className="flex justify-center items-center h-20">
-                            <div className="text-sm text-gray-500">Loading channels...</div>
+                            <div className="text-sm text-gray-500">Loading channels and groups...</div>
                           </div>
-                        ) : channels.length === 0 ? (
+                        ) : (channels.length === 0 && groups.length === 0) ? (
                           <div className="flex justify-center items-center h-20">
                             <div className="text-sm text-gray-500 text-center">
-                              No channels with messages found
+                              No channels or groups found
                             </div>
                           </div>
                         ) : (
-                          channels.map((channel) => (
-                            <div
-                              key={channel.id}
-                              className="p-3 rounded-lg border hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors"
-                              onClick={() => handleConversationSelect(channel)}
-                            >
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center space-x-2">
-                                  <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-                                  <div>
-                                    <div className="font-medium text-sm">
-                                      {channel.display_name || channel.name}
-                                    </div>
-                                    {channel.description && (
-                                      <div className="text-xs text-gray-500 truncate">
-                                        {channel.description}
+                          <>
+                            {/* Show Channels */}
+                            {channels.map((channel) => (
+                              <div
+                                key={channel.id}
+                                className="p-3 rounded-lg border hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors"
+                                onClick={() => handleConversationSelect({ ...channel, type: 'channel' })}
+                              >
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center space-x-2">
+                                    <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                                    <div>
+                                      <div className="font-medium text-sm">
+                                        {channel.name}
                                       </div>
-                                    )}
+                                      {channel.description && (
+                                        <div className="text-xs text-gray-500 truncate">
+                                          {channel.description}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="text-xs text-gray-400">
+                                    {channel.unread_count && channel.unread_count > 0 ? `${channel.unread_count} msgs` : 'Click to view'}
                                   </div>
                                 </div>
-                                <div className="text-xs text-gray-400">
-                                  {channel.unread_count && channel.unread_count > 0 ? `${channel.unread_count} msgs` : 'Click to view'}
+                              </div>
+                            ))}
+                            
+                            {/* Show Groups */}
+                            {groups.map((group) => (
+                              <div
+                                key={group.id}
+                                className="p-3 rounded-lg border hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors"
+                                onClick={() => handleConversationSelect({ ...group, type: 'private_group' })}
+                              >
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center space-x-2">
+                                    <div className="w-2 h-2 bg-purple-500 rounded-full"></div>
+                                    <div>
+                                      <div className="font-medium text-sm">
+                                        {group.name}
+                                      </div>
+                                      {group.description && (
+                                        <div className="text-xs text-gray-500 truncate">
+                                          {group.description}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="text-xs text-gray-400">
+                                    {group.unread_count && group.unread_count > 0 ? `${group.unread_count} msgs` : 'Click to view'}
+                                  </div>
                                 </div>
                               </div>
+                            ))}
+                          </>
+                        )}
+                      </>
+                    )}
+                    
+                    {activeTab === 'groups' && (
+                      <>
+                        {loadingChannels || loadingGroups ? (
+                          <div className="flex justify-center items-center h-20">
+                            <div className="text-sm text-gray-500">Loading groups...</div>
+                          </div>
+                        ) : (channels.length === 0 && groups.length === 0) ? (
+                          <div className="flex justify-center items-center h-20">
+                            <div className="text-sm text-gray-500 text-center">
+                              No groups found
                             </div>
-                          ))
+                          </div>
+                        ) : (
+                          <>
+                            {/* Show Channels in Groups tab */}
+                            {channels.map((channel) => (
+                              <div
+                                key={channel.id}
+                                className="p-3 rounded-lg border hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors"
+                                onClick={() => handleConversationSelect({ ...channel, type: 'channel' })}
+                              >
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center space-x-2">
+                                    <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                                    <div>
+                                      <div className="font-medium text-sm">
+                                        {channel.name}
+                                      </div>
+                                      {channel.description && (
+                                        <div className="text-xs text-gray-500 truncate">
+                                          {channel.description}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="text-xs text-gray-400">
+                                    {channel.unread_count && channel.unread_count > 0 ? `${channel.unread_count} msgs` : 'Click to view'}
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                            
+                            {/* Show Private Groups */}
+                            {groups.map((group) => (
+                              <div
+                                key={group.id}
+                                className="p-3 rounded-lg border hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors"
+                                onClick={() => handleConversationSelect({ ...group, type: 'private_group' })}
+                              >
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center space-x-2">
+                                    <div className="w-2 h-2 bg-purple-500 rounded-full"></div>
+                                    <div>
+                                      <div className="font-medium text-sm">
+                                        {group.name}
+                                      </div>
+                                      {group.description && (
+                                        <div className="text-xs text-gray-500 truncate">
+                                          {group.description}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="text-xs text-gray-400">
+                                    {group.unread_count && group.unread_count > 0 ? `${group.unread_count} msgs` : 'Click to view'}
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </>
                         )}
                       </>
                     )}
@@ -441,7 +554,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onOpenFullChat }) => {
                           </div>
                         ) : (
                           filteredDMs.flatMap((dm) => {
-                            const displayName = dm.display_name || dm.other_user || dm.name || '';
+                            const displayName = dm.name || '';
                             const users = displayName.includes(',')
                               ? displayName.split(',').map(name => name.trim())
                               : [displayName];
@@ -449,7 +562,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onOpenFullChat }) => {
                               <div
                                 key={`${dm.id}-${index}`}
                                 className="p-3 rounded-lg border hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors"
-                                onClick={() => handleConversationSelect({ ...dm, other_user: userName, display_name: userName })}
+                                onClick={() => handleConversationSelect({ ...dm, other_user: userName, name: userName, type: 'direct_message' })}
                               >
                                 <div className="flex items-center justify-between">
                                   <div className="flex items-center space-x-2">
@@ -511,7 +624,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onOpenFullChat }) => {
                             <div className="flex-1 min-w-0">
                               {!isOwnMessage && (
                                 <div className="text-xs font-medium mb-1 opacity-70">
-                                  {message.user?.name || message.user?.username}
+                                  {message.user?.username || message.user?.name}
                                 </div>
                               )}
                               <div className="text-sm break-words">

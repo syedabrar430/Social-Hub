@@ -12,7 +12,6 @@ from pathlib import Path
 from google.oauth2 import id_token
 from google.auth.transport import requests
 
-# Import our modules  
 from database import get_db, create_tables, User, ChatMessage
 from schemas import UserRegistration, UserLogin, UserResponse, Token, Message, GoogleAuthRequest, UserProfileUpdate, ChatMessageCreate, ChatMessageResponse
 from crud import create_user, authenticate_user, get_user_by_email, get_user_by_id, create_google_user, get_user_by_google_id, create_chat_message, get_recent_chat_messages
@@ -407,20 +406,13 @@ async def get_channel_messages(
 ):
     """Get messages from channel"""
     try:
-        print(f"DEBUG: Getting messages for channel: {channel_name}")
         messages = await rocket_client.get_channel_messages(channel_name)
-        print(f"DEBUG: Raw messages from Rocket.Chat: {len(messages) if messages else 0} messages")
-        print(f"DEBUG: First few messages: {messages[:2] if messages else 'No messages'}")
         
         # Transform messages for frontend
         formatted_messages = []
-        for i, msg in enumerate(messages):
+        for msg in messages:
             try:
-                if i < 3:  # Only debug first 3 messages
-                    print(f"DEBUG: Message {i} type: {type(msg)}")
                 if not isinstance(msg, dict):
-                    if i < 3:
-                        print(f"DEBUG: Skipping non-dict message {i}: {msg}")
                     continue
                     
                 user_data = msg.get("u", {})
@@ -438,16 +430,9 @@ async def get_channel_messages(
                     "thread_count": msg.get("tcount", 0),
                     "thread_ts": msg.get("tmid")
                 }
-                if i < 3:
-                    print(f"DEBUG: Successfully formatted message {i}: {formatted_message['id']}")
                 formatted_messages.append(formatted_message)
-            except Exception as e:
-                if i < 3:
-                    print(f"DEBUG: Error formatting message {i}: {e}")
-                    print(f"DEBUG: Message {i} that caused error: {msg}")
+            except Exception:
                 continue
-        
-        print(f"DEBUG: Returning {len(formatted_messages)} formatted messages")
         return {"messages": formatted_messages}
         
     except Exception as e:
@@ -460,19 +445,12 @@ async def get_thread_messages(
 ):
     """Get thread messages for a parent message"""
     try:
-        print(f"DEBUG: Getting thread messages for parent ID: {parent_message_id}")
         messages = await rocket_client.get_thread_messages(parent_message_id)
-        print(f"DEBUG: Raw thread messages from Rocket.Chat: {len(messages)} messages")
-        if messages:
-            print(f"DEBUG: First thread message: {messages[0]}")
-        else:
-            print("DEBUG: No thread messages found")
         
-        # Transform messages for frontend (same as regular messages)
+        # Transform messages for frontend
         formatted_messages = []
-        for i, message in enumerate(messages):
+        for message in messages:
             try:
-                print(f"DEBUG: Processing thread message {i}: {message.get('_id', 'unknown')}")
                 user_info = message.get("u", {})
                 
                 # Handle timestamp - Rocket.Chat thread messages have different format
@@ -500,12 +478,8 @@ async def get_thread_messages(
                     "thread_ts": message.get("tmid")
                 }
                 formatted_messages.append(formatted_message)
-                print(f"DEBUG: Successfully processed thread message {i}")
-            except Exception as msg_error:
-                print(f"ERROR: Failed to format thread message {i}: {msg_error}")
-                print(f"ERROR: Message data: {message}")
-                import traceback
-                traceback.print_exc()
+            except Exception:
+                continue
         
         return {"messages": formatted_messages}
     except Exception as e:
@@ -544,48 +518,29 @@ async def add_reaction(
 ):
     """Add reaction to a message"""
     try:
-        print(f"DEBUG: Add reaction endpoint called with request_data: {request_data}")
-        print(f"DEBUG: Current user: {current_user.email}")
-        
         message_id = request_data.get('message_id')
         emoji = request_data.get('emoji')
         
-        print(f"DEBUG: Extracted message_id: {message_id}, emoji: {emoji}")
-        
         if not message_id or not emoji:
-            print("DEBUG: Missing message_id or emoji")
             raise HTTPException(status_code=400, detail="message_id and emoji are required")
         
-        print("DEBUG: Ensuring authentication...")
-        # Ensure authentication before adding reaction
         authenticated = await rocket_client.ensure_authenticated(
             social_hub_user_email=current_user.email,
             social_hub_user_name=current_user.full_name,
             social_hub_user_id=str(current_user.id)
         )
         
-        print(f"DEBUG: Authentication result: {authenticated}")
-        
         if not authenticated:
-            print("DEBUG: Authentication failed")
             raise HTTPException(status_code=401, detail="Failed to authenticate with Rocket.Chat")
         
-        print("DEBUG: Calling rocket_client.add_reaction...")
         result = await rocket_client.add_reaction(message_id, emoji)
         
-        print(f"DEBUG: Reaction result: {result}")
-        
         if result.get("success"):
-            print("DEBUG: Reaction successful")
             return {"success": True}
         else:
-            print(f"DEBUG: Reaction failed: {result.get('error')}")
             raise HTTPException(status_code=400, detail=result.get("error", "Failed to add reaction"))
             
     except Exception as e:
-        print(f"DEBUG: Exception in add_reaction endpoint: {e}")
-        import traceback
-        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Add reaction failed: {str(e)}")
 
 @app.post("/chat/remove-reaction")
@@ -833,8 +788,9 @@ async def get_dm_messages(
 async def get_dm_list(current_user: User = Depends(get_current_user)):
     """Get all DM conversations"""
     try:
-        dm_list = await rocket_client.get_direct_messages_list()
-        return {"dms": dm_list}
+        # Use the same structured response as channels endpoint
+        rooms = await rocket_client.get_all_user_rooms()
+        return {"dms": rooms['direct_messages']}
     except Exception as e:
         print(f"Error getting DM list: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get DM list: {str(e)}")
@@ -899,9 +855,9 @@ async def get_all_channels(current_user: User = Depends(get_current_user)):
         if not authenticated:
             raise HTTPException(status_code=401, detail="Failed to authenticate with Rocket.Chat")
         
-        channels = await rocket_client.get_all_conversations()
-        print(f"DEBUG: Returning {len(channels)} channels")
-        return channels
+        rooms = await rocket_client.get_all_user_rooms()
+        print(f"DEBUG: Returning rooms: {rooms}")
+        return rooms
     except Exception as e:
         print(f"Error getting channels: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get channels: {str(e)}")

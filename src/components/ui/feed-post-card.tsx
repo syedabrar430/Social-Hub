@@ -3,7 +3,6 @@ import { Heart, MessageCircle, Share2, MoreHorizontal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Post } from '@/lib/mockData';
 
 interface FeedPostCardProps {
@@ -69,18 +68,15 @@ const FeedPostCard: React.FC<FeedPostCardProps> = ({ post }) => {
               <span>{likeCount}</span>
             </Button>
 
-            <Collapsible open={isCommentsOpen} onOpenChange={setIsCommentsOpen}>
-              <CollapsibleTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="flex items-center space-x-2 hover:text-primary hover:bg-primary/10 transition-smooth"
-                >
-                  <MessageCircle className="h-4 w-4" />
-                  <span>{post.comments.length}</span>
-                </Button>
-              </CollapsibleTrigger>
-            </Collapsible>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsCommentsOpen(!isCommentsOpen)}
+              className="flex items-center space-x-2 hover:text-primary hover:bg-primary/10 transition-smooth"
+            >
+              <MessageCircle className="h-4 w-4" />
+              <span>{post.comments.length}</span>
+            </Button>
 
             <Button
               variant="ghost"
@@ -94,12 +90,12 @@ const FeedPostCard: React.FC<FeedPostCardProps> = ({ post }) => {
         </div>
 
         {/* Comments Section */}
-        <Collapsible open={isCommentsOpen} onOpenChange={setIsCommentsOpen}>
-          <CollapsibleContent className="mt-4 animate-slide-up">
+        {isCommentsOpen && (
+          <div className="mt-4">
             <Separator className="mb-4" />
             <div className="space-y-3">
               {post.comments.map((comment) => (
-                <div key={comment.id} className="flex space-x-3 animate-fade-in">
+                <div key={comment.id} className="flex space-x-3">
                   <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center text-sm">
                     {comment.user.avatar}
                   </div>
@@ -141,8 +137,8 @@ const FeedPostCard: React.FC<FeedPostCardProps> = ({ post }) => {
                 </div>
               </div>
             </div>
-          </CollapsibleContent>
-        </Collapsible>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
