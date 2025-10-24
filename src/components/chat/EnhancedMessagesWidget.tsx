@@ -534,6 +534,7 @@ const EnhancedMessagesWidget = () => {
                         messages.forEach((message, index) => {
                           if (message.is_thread_message) return;
                           
+                          
                           const currentMessageDate = new Date(message.timestamp).toDateString();
                           const showDateSeparator = currentMessageDate !== lastDate;
                           
@@ -579,49 +580,6 @@ const EnhancedMessagesWidget = () => {
                                   <div className="text-xs opacity-70 mt-1">
                                     {formatMessageTime(message.timestamp)}
                                   </div>
-                                  
-                                  {/* Reactions */}
-                                  {message.reactions && Object.keys(message.reactions).length > 0 && (
-                                    <div className="flex gap-2 mt-2">
-                                      {Object.entries(message.reactions).map(([emoji, usernames]) => (
-                                        <button
-                                          key={emoji}
-                                          className="px-2 py-1 rounded bg-gray-200 text-xs hover:bg-gray-300 cursor-pointer"
-                                          onClick={() => handleReactionToggle(message.id, emoji)}
-                                        >
-                                          {emoji} {usernames.length}
-                                        </button>
-                                      ))}
-                                    </div>
-                                  )}
-                                  
-                                  {/* Thread count display */}
-                                  {message.thread_count && message.thread_count > 0 && (
-                                    <div className="text-xs text-muted-foreground mt-1">
-                                      {message.thread_count} {message.thread_count === 1 ? 'reply' : 'replies'}
-                                    </div>
-                                  )}
-                                  
-                                  {/* Action buttons */}
-                                  {!isSystemMessage && (
-                                    <div className="flex items-center space-x-2 mt-2">
-                                      <button
-                                        onClick={() => setShowReactionPicker(showReactionPicker === message.id ? null : message.id)}
-                                        className="text-xs text-muted-foreground hover:text-foreground"
-                                      >
-                                        <Smile className="h-3 w-3" />
-                                      </button>
-                                      {message.thread_count && message.thread_count > 0 && (
-                                        <button
-                                          onClick={() => handleLoadThread(message.id)}
-                                          className="text-xs text-muted-foreground hover:text-foreground flex items-center space-x-1"
-                                        >
-                                          <Reply className="h-3 w-3" />
-                                          <span>View thread ({message.thread_count})</span>
-                                        </button>
-                                      )}
-                                    </div>
-                                  )}
                                 </div>
                               </div>
                               
