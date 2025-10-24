@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Frontend DM</title>
+</head>
+<body>
+    <h1>Test Frontend DM Access</h1>
+    <div id="result"></div>
+    
+    <script>
+        async function testDM() {
+            try {
+                // First login
+                const loginResponse = await fetch('http://localhost:8000/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        email: 'ankush8@gmail.com',
+                        password: 'Ankushsocial@2'
+                    })
+                });
+                
+                if (!loginResponse.ok) {
+                    throw new Error(`Login failed: ${loginResponse.status}`);
+                }
+                
+                const loginData = await loginResponse.json();
+                const token = loginData.access_token;
+                console.log('Login successful, token:', token.substring(0, 20) + '...');
+                
+                // Now test channels endpoint
+                const channelsResponse = await fetch('http://localhost:8000/api/rocket-chat/channels', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json',
+                    }
+                });
+                
+                if (!channelsResponse.ok) {
+                    throw new Error(`Channels request failed: ${channelsResponse.status}`);
+                }
+                
+                const channelsData = await channelsResponse.json();
+                console.log('Channels response:', channelsData);
+                
+                document.getElementById('result').innerHTML = `
+                    <h2>Success!</h2>
+                    <p>Channels: ${channelsData.channels?.length || 0}</p>
+                    <p>Groups: ${channelsData.groups?.length || 0}</p>
+                    <p>Direct Messages: ${channelsData.direct_messages?.length || 0}</p>
+                    <pre>${JSON.stringify(channelsData, null, 2)}</pre>
+                `;
+                
+            } catch (error) {
+                console.error('Error:', error);
+                document.getElementById('result').innerHTML = `<h2>Error: ${error.message}</h2>`;
+            }
+        }
+        
+        testDM();
+    </script>
+</body>
+</html>

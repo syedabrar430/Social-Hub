@@ -152,6 +152,11 @@ class ChatService {
     return response.groups || [];
   }
 
+  // Get all Rocket.Chat rooms (channels, groups, DMs)
+  async getAllRocketChatRooms(): Promise<{channels: ChatConversation[], groups: ChatConversation[], direct_messages: ChatConversation[]}> {
+    return this.request<{channels: ChatConversation[], groups: ChatConversation[], direct_messages: ChatConversation[]}>('/api/rocket-chat/channels');
+  }
+
   // Get channels that have messages > 0
   async getChannelsWithMessages(): Promise<ChatConversation[]> {
     try {

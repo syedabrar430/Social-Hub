@@ -126,7 +126,9 @@ const EnhancedMessagesWidget = () => {
 
   // Load conversations when component mounts
   useEffect(() => {
+    console.log('🔍 EnhancedMessagesWidget useEffect - isAuthenticated:', isAuthenticated, 'isInitialized:', isInitialized);
     if (isAuthenticated && !isInitialized) {
+      console.log('🔄 Starting to load channels and DMs...');
       loadChannelsAndDMs();
     }
   }, [isAuthenticated, isInitialized]);
@@ -151,22 +153,26 @@ const EnhancedMessagesWidget = () => {
 
   const loadChannelsAndDMs = async () => {
     console.log('🔄 Loading channels, groups and DMs...');
+    console.log('🔍 User info:', { isAuthenticated, user: user?.email });
+    console.log('🔍 Token in localStorage:', !!localStorage.getItem('access_token'));
+    
     setLoadingChannels(true);
     setLoadingGroups(true);
     setLoadingDMs(true);
     
     try {
-      // Load channels with messages
+      // Use the same methods as the chat widget
+      console.log('🔄 Loading channels with messages...');
       const channelsData = await rocketChatService.getChannelsWithMessages();
       console.log('📺 Channels loaded:', channelsData);
       setChannels(channelsData);
       
-      // Load groups with messages
+      console.log('🔄 Loading groups with messages...');
       const groupsData = await rocketChatService.getGroupsWithMessages();
       console.log('👥 Groups loaded:', groupsData);
       setGroups(groupsData);
       
-      // Load direct messages
+      console.log('🔄 Loading direct messages...');
       const dmsData = await rocketChatService.getDirectMessagesWithMessages();
       console.log('💬 DMs loaded:', dmsData);
       console.log('💬 DMs count:', dmsData.length);
@@ -184,7 +190,11 @@ const EnhancedMessagesWidget = () => {
       
       setIsInitialized(true);
     } catch (error) {
-      console.error('Failed to load channels, groups and DMs:', error);
+      console.error('❌ Failed to load channels, groups and DMs:', error);
+      console.error('❌ Error details:', {
+        message: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined
+      });
       setIsInitialized(true);
     } finally {
       setLoadingChannels(false);
@@ -205,8 +215,10 @@ const EnhancedMessagesWidget = () => {
       let conversationMessages: ChatMessage[] = [];
       
       if (conversation.type === 'direct_message' && conversation.other_user) {
-        console.log('Loading DM messages for:', conversation.other_user);
-        conversationMessages = await rocketChatService.getDirectMessageMessages(conversation.other_user);
+        // Use the conversation name (Rocket.Chat username) instead of display name
+        const username = conversation.name || conversation.other_user;
+        console.log('Loading DM messages for username:', username, 'display_name:', conversation.other_user);
+        conversationMessages = await rocketChatService.getDirectMessageMessages(username);
       } else {
         console.log('Loading channel messages for:', conversation.name || conversation.id);
         conversationMessages = await rocketChatService.getRocketChatChannelMessages(
@@ -377,11 +389,11 @@ const EnhancedMessagesWidget = () => {
     
     switch (activeTab) {
       case 'all':
-        return [...channels, ...groups, ...directMessages];
+        return [...channels, ...groups, ...filteredDMs];
       case 'groups':
         return [...channels, ...groups];
       case 'dms':
-        return directMessages;
+        return filteredDMs;
       default:
         return [];
     }
@@ -394,6 +406,7 @@ const EnhancedMessagesWidget = () => {
     conv.other_user?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  // Debug logging for conversations
   console.log('🔍 EnhancedMessagesWidget - Conversations:', {
     activeTab,
     channels: channels.length,
@@ -401,8 +414,18 @@ const EnhancedMessagesWidget = () => {
     directMessages: directMessages.length,
     filteredDMs: filteredDMs.length,
     conversations: conversations.length,
-    filteredConversations: filteredConversations.length
+    filteredConversations: filteredConversations.length,
+    searchQuery
   });
+  
+  // Debug the actual conversations array
+  console.log('🔍 filteredConversations array:', filteredConversations.map(conv => ({
+    id: conv.id,
+    name: conv.name,
+    type: conv.type,
+    display_name: conv.display_name,
+    other_user: conv.other_user
+  })));
 
   // Show loading while checking authentication
   if (authLoading) {
@@ -502,6 +525,14 @@ const EnhancedMessagesWidget = () => {
                     </div>
                   ) : (
                     filteredConversations.map((conversation) => {
+                      console.log('🎨 Rendering conversation:', {
+                        id: conversation.id,
+                        name: conversation.name,
+                        type: conversation.type,
+                        display_name: conversation.display_name,
+                        other_user: conversation.other_user
+                      });
+                      
                       const isSelected = selectedConversation?.id === conversation.id;
                       const isDM = conversation.type === 'direct_message';
                       const isGroup = conversation.type === 'private_group';
@@ -512,8 +543,13 @@ const EnhancedMessagesWidget = () => {
                           key={conversation.id}
                           className={`p-3 rounded-lg border hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors ${
                             isSelected ? 'bg-primary/10 border-primary' : ''
-                          }`}
+                          } ${isDM ? 'bg-green-50 border-green-200' : ''}`}
                           onClick={() => handleConversationSelect(conversation)}
+                          style={{
+                            backgroundColor: isDM ? '#f0fdf4' : undefined,
+                            borderColor: isDM ? '#bbf7d0' : undefined,
+                            borderWidth: isDM ? '2px' : undefined
+                          }}
                         >
                           <div className="flex items-center justify-between">
                             <div className="flex items-center space-x-2">
@@ -523,6 +559,7 @@ const EnhancedMessagesWidget = () => {
                               <div>
                                 <div className="font-medium text-sm">
                                   {conversation.display_name || conversation.name || conversation.other_user}
+                                  {isDM && <span className="ml-2 text-xs bg-green-100 text-green-800 px-2 py-1 rounded">DM</span>}
                                 </div>
                                 {conversation.description && (
                                   <div className="text-xs text-gray-500 truncate">

@@ -942,11 +942,14 @@ class RocketChatClient:
                     }
                     
                     if sub.get('t') == 'c':  # Channel
+                        room_data['type'] = 'channel'  # Convert 'c' to full type name
                         channels.append(room_data)
                     elif sub.get('t') == 'p':  # Private group
+                        room_data['type'] = 'private_group'  # Convert 'p' to full type name
                         groups.append(room_data)
                     elif sub.get('t') == 'd':  # Direct message
                         room_data['other_user'] = sub.get('fname', sub.get('name'))
+                        room_data['type'] = 'direct_message'  # Convert 'd' to full type name
                         direct_messages.append(room_data)
                 
                 rooms = {
