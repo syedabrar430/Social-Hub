@@ -766,6 +766,8 @@ async def get_dm_messages(
                 continue
                 
             user_data = msg.get("u", {})
+            print(f"DEBUG: User data for message {i}: {user_data}")
+            print(f"DEBUG: Username: {user_data.get('username')}, Name: {user_data.get('name')}")
             timestamp = msg.get("ts", "")
             
             if isinstance(timestamp, dict):
@@ -795,9 +797,25 @@ async def get_dm_messages(
                     display_emoji = emoji_display_map.get(emoji, emoji)
                     reactions[display_emoji] = reaction_data.get("usernames", [])
             
+            # Map display names to usernames for consistent display
+            display_name = user_data.get("name", "Unknown")
+            username = user_data.get("username", "")
+            
+            # If we have a display name but no username, try to map it
+            if display_name and not username:
+                # Map known display names to usernames
+                name_to_username_map = {
+                    "AI_SE": "cs23mtech15009",
+                    "Ankush Chhabra": "ankush8"
+                }
+                username = name_to_username_map.get(display_name, display_name)
+            
+            # Use username if available, otherwise fall back to display name
+            sender_name = username or display_name
+            
             formatted_message = {
                 "id": msg.get("_id", f"dm-{i}"),
-                "sender": user_data.get("name") or user_data.get("username", "Unknown"),
+                "sender": sender_name,
                 "content": msg.get("msg", ""),
                 "timestamp": timestamp,
                 "isOwn": user_data.get("username") == "ankush1",

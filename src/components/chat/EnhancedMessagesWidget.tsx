@@ -565,7 +565,7 @@ const EnhancedMessagesWidget = () => {
                               }`}></div>
                               <div>
                                 <div className="font-medium text-sm">
-                                  {conversation.display_name || conversation.name || conversation.other_user}
+                                  {isDM ? (conversation.name || conversation.other_user) : (conversation.display_name || conversation.name || conversation.other_user)}
                                   {isDM && <span className="ml-2 text-xs bg-green-100 text-green-800 px-2 py-1 rounded">DM</span>}
                                 </div>
                                 {conversation.description && (
@@ -604,7 +604,12 @@ const EnhancedMessagesWidget = () => {
                          selectedConversation.type === 'private_group' ? <Users className="h-5 w-5" /> : <Hash className="h-5 w-5" />}
                       </div>
                       <div>
-                        <h2 className="font-semibold">{selectedConversation.display_name || selectedConversation.name || selectedConversation.other_user}</h2>
+                        <h2 className="font-semibold">
+                          {selectedConversation.type === 'direct_message' 
+                            ? (selectedConversation.name || selectedConversation.other_user)
+                            : (selectedConversation.display_name || selectedConversation.name || selectedConversation.other_user)
+                          }
+                        </h2>
                         <p className="text-sm text-muted-foreground">
                           {selectedConversation.type === 'direct_message' ? 'Direct Message' :
                            selectedConversation.type === 'private_group' ? 'Private Group' : 'Rocket.Chat Channel'}
@@ -764,6 +769,28 @@ const EnhancedMessagesWidget = () => {
                                           </div>
                                         )}
                                       </div>
+                                      
+                                      {/* Thread Reply Button */}
+                                      <div className="relative">
+                                        <button
+                                          onClick={() => {
+                                            if (openThreads.has(message.id)) {
+                                              setOpenThreads(prev => {
+                                                const newSet = new Set(prev);
+                                                newSet.delete(message.id);
+                                                return newSet;
+                                              });
+                                            } else {
+                                              setOpenThreads(prev => new Set(prev).add(message.id));
+                                              handleLoadThread(message.id);
+                                            }
+                                          }}
+                                          className="flex items-center justify-center w-6 h-6 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600 transition-colors"
+                                          title="Reply in thread"
+                                        >
+                                          <Reply className="h-4 w-4" />
+                                        </button>
+                                      </div>
                                     </div>
                                   )}
                                 </div>
@@ -830,7 +857,11 @@ const EnhancedMessagesWidget = () => {
                   <div className="flex items-center space-x-2">
                     <div className="flex-1 relative">
                       <Input
-                        placeholder={`Message ${selectedConversation.display_name || selectedConversation.name || selectedConversation.other_user}...`}
+                        placeholder={`Message ${
+                          selectedConversation.type === 'direct_message' 
+                            ? (selectedConversation.name || selectedConversation.other_user)
+                            : (selectedConversation.display_name || selectedConversation.name || selectedConversation.other_user)
+                        }...`}
                         value={newMessage}
                         onChange={(e) => setNewMessage(e.target.value)}
                         onKeyPress={(e) => {
