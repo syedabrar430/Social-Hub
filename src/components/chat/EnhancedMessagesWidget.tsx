@@ -251,7 +251,10 @@ const EnhancedMessagesWidget = () => {
 
     try {
       if (selectedConversation.type === 'direct_message' && selectedConversation.other_user) {
-        await rocketChatService.sendDirectMessage(selectedConversation.other_user, messageContent);
+        // Use the conversation name (Rocket.Chat username) for sending DMs
+        const username = selectedConversation.name || selectedConversation.other_user;
+        console.log('Sending DM to username:', username, 'display_name:', selectedConversation.other_user);
+        await rocketChatService.sendDirectMessage(username, messageContent);
       } else {
         await rocketChatService.sendRocketChatChannelMessage(
           selectedConversation.name || selectedConversation.id,
@@ -270,16 +273,20 @@ const EnhancedMessagesWidget = () => {
           username: user?.email?.split('@')[0] || user?.name || 'You',
           name: user?.name || 'You'
         },
+        sender: user?.email?.split('@')[0] || user?.name || 'You',
         timestamp: new Date().toISOString(),
-        type: 'message'
+        type: 'message',
+        isOwn: true
       };
       
+      console.log('Adding sent message to UI:', newMessageObj);
       setMessages(prev => [...prev, newMessageObj]);
     } catch (error) {
       console.error('Failed to send message:', error);
+      console.error('Error details:', error);
       toast({
         title: "Error",
-        description: "Failed to send message",
+        description: `Failed to send message: ${error instanceof Error ? error.message : 'Unknown error'}`,
         variant: "destructive",
       });
     } finally {
@@ -651,9 +658,39 @@ const EnhancedMessagesWidget = () => {
                           }
                           
                           const isSystemMessage = message.type === 'system';
-                          const isOwnMessage = message.user?.username === user?.email?.split('@')[0] || 
-                                             message.user?.username === 'ankush1' ||
-                                             message.user?.username === user?.name?.toLowerCase().replace(/\s+/g, '');
+                          
+                          // Determine if this message is from the current user
+                          const currentUserUsername = user?.email?.split('@')[0]; // e.g., 'ankush8'
+                          const currentUserName = user?.name?.toLowerCase().replace(/\s+/g, ''); // e.g., 'ankushchhabra'
+                          const currentUserFullName = user?.name; // e.g., 'Ankush Chhabra'
+                          
+                          // Check multiple possible sender formats
+                          const isOwnMessage = message.user?.username === currentUserUsername || 
+                                             message.user?.username === currentUserName ||
+                                             message.user?.name === user?.name ||
+                                             message.sender === currentUserUsername ||
+                                             message.sender === currentUserName ||
+                                             message.sender === currentUserFullName ||
+                                             message.sender === user?.name || // Direct match for current user's full name
+                                             message.isOwn === true;
+                          
+                          console.log('🔍 Message ownership check:', {
+                            messageId: message.id,
+                            messageSender: message.sender,
+                            messageUser: message.user?.username,
+                            messageUserName: message.user?.name,
+                            currentUserUsername,
+                            currentUserName,
+                            currentUserEmail: user?.email,
+                            currentUserFullName: user?.name,
+                            isOwnMessage,
+                            messageData: message,
+                            // Additional checks
+                            senderMatchesUsername: message.sender === currentUserUsername,
+                            senderMatchesName: message.sender === currentUserName,
+                            senderMatchesFullName: message.sender === currentUserFullName,
+                            senderMatchesUser: message.sender === user?.name
+                          });
                           
                           messageElements.push(
                             <div key={message.id} className={`${message.is_thread_message ? 'ml-6 border-l-2 border-muted pl-4' : ''}`}>
@@ -662,12 +699,12 @@ const EnhancedMessagesWidget = () => {
                                   isSystemMessage
                                     ? 'bg-muted text-center text-sm italic mx-auto'
                                     : isOwnMessage
-                                    ? 'bg-primary text-primary-foreground'
-                                    : 'bg-muted'
+                                    ? 'bg-primary text-primary-foreground ml-auto'
+                                    : 'bg-muted mr-auto'
                                 }`}>
-                                  {!isSystemMessage && (
+                                  {!isSystemMessage && !isOwnMessage && (
                                     <div className="text-xs text-muted-foreground mb-1">
-                                      {message.user?.username || message.user?.name}
+                                      {message.user?.username || message.user?.name || message.sender}
                                     </div>
                                   )}
                                   <p className="text-sm">{message.text || message.content}</p>

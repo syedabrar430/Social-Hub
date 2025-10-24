@@ -808,20 +808,27 @@ class RocketChatClient:
             print(f"Exception creating or getting DM room: {e}")
             return None
 
-    async def get_dm_messages(self, username: str, count: int = 50) -> List[Dict]:
+    async def get_dm_messages(self, username: str, count: int = 50, user_headers: Dict = None) -> List[Dict]:
         """Get direct messages with a specific user"""
         try:
-            if not await self.ensure_authenticated():
-                return []
+            # Use user-specific headers if provided, otherwise use default headers
+            headers = user_headers if user_headers else self.headers
             
-            room_id = await self.create_or_get_dm_room(username)
+            # If we have user headers, we're already authenticated as that user
+            if user_headers:
+                print(f"✅ Using user-specific headers for DM messages")
+            else:
+                if not await self.ensure_authenticated():
+                    return []
+            
+            room_id = await self.create_or_get_dm_room(username, user_headers)
             if not room_id:
                 return []
             
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(
                     f"{self.base_url}/api/v1/im.messages",
-                    headers=self.headers,
+                    headers=headers,
                     params={
                         "roomId": room_id,
                         "count": count

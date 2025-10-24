@@ -741,13 +741,22 @@ async def send_message_to_general(
 async def get_dm_messages(
     username: str,
     limit: int = 50,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """Get DM messages with a specific user"""
     try:
         print(f"DEBUG: Fetching DM messages with {username} for user: {current_user.email}")
         
-        messages = await rocket_client.get_dm_messages(username, limit)
+        # Get user-specific headers for API calls
+        user_headers = await rocket_client.get_user_headers(
+            social_hub_user_email=current_user.email,
+            social_hub_user_name=current_user.full_name,
+            social_hub_user_id=str(current_user.id),
+            db_session=db
+        )
+        
+        messages = await rocket_client.get_dm_messages(username, limit, user_headers)
         print(f"DEBUG: Got {len(messages)} DM messages with {username}")
         
         # Convert to frontend format
@@ -766,6 +775,26 @@ async def get_dm_messages(
             else:
                 timestamp = "2024-01-01T00:00:00.000Z"
             
+            # Convert reactions format (same as channel messages)
+            reactions = {}
+            if msg.get("reactions"):
+                for emoji, reaction_data in msg["reactions"].items():
+                    # Convert colon format back to unicode for display
+                    emoji_display_map = {
+                        ":+1:": "👍",
+                        ":heart:": "❤️", 
+                        ":joy:": "😂",
+                        ":open_mouth:": "😮",
+                        ":cry:": "😢",
+                        ":rage:": "😡",
+                        ":thumbsup:": "👍",
+                        ":thumbsdown:": "👎",
+                        ":fire:": "🔥",
+                        ":100:": "💯"
+                    }
+                    display_emoji = emoji_display_map.get(emoji, emoji)
+                    reactions[display_emoji] = reaction_data.get("usernames", [])
+            
             formatted_message = {
                 "id": msg.get("_id", f"dm-{i}"),
                 "sender": user_data.get("name") or user_data.get("username", "Unknown"),
@@ -773,7 +802,8 @@ async def get_dm_messages(
                 "timestamp": timestamp,
                 "isOwn": user_data.get("username") == "ankush1",
                 "avatar": None,
-                "type": "message"
+                "type": "message",
+                "reactions": reactions
             }
             formatted_messages.append(formatted_message)
         
