@@ -515,14 +515,29 @@ class RocketChatClient:
             if not await self.ensure_authenticated():
                 return {"success": False, "error": "Authentication failed"}
             
+            # Convert Unicode emojis to colon format
+            emoji_map = {
+                "👍": ":thumbsup:",
+                "❤️": ":heart:",
+                "😂": ":joy:",
+                "😮": ":open_mouth:",
+                "😢": ":cry:",
+                "😡": ":rage:",
+                "🔥": ":fire:",
+                "💯": ":100:"
+            }
+            
+            # Use colon format if available, otherwise use the emoji as-is
+            colon_emoji = emoji_map.get(emoji, emoji)
+            
             reaction_data = {
                 "messageId": message_id,
-                "emoji": emoji
+                "emoji": colon_emoji
             }
             
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(
-                    f"{self.base_url}/api/v1/reactions.set",
+                    f"{self.base_url}/api/v1/chat.react",
                     json=reaction_data,
                     headers=self.headers
                 )
@@ -545,14 +560,29 @@ class RocketChatClient:
             if not await self.ensure_authenticated():
                 return {"success": False, "error": "Authentication failed"}
             
+            # Convert Unicode emojis to colon format
+            emoji_map = {
+                "👍": ":thumbsup:",
+                "❤️": ":heart:",
+                "😂": ":joy:",
+                "😮": ":open_mouth:",
+                "😢": ":cry:",
+                "😡": ":rage:",
+                "🔥": ":fire:",
+                "💯": ":100:"
+            }
+            
+            # Use colon format if available, otherwise use the emoji as-is
+            colon_emoji = emoji_map.get(emoji, emoji)
+            
             reaction_data = {
                 "messageId": message_id,
-                "emoji": emoji
+                "emoji": colon_emoji
             }
             
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(
-                    f"{self.base_url}/api/v1/reactions.unset",
+                    f"{self.base_url}/api/v1/chat.react",
                     json=reaction_data,
                     headers=self.headers
                 )

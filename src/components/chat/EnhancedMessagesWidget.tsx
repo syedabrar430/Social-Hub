@@ -48,6 +48,9 @@ const EnhancedMessagesWidget = () => {
   const [selectedConversation, setSelectedConversation] = useState<ChatConversation | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   
+  // State persistence
+  const [isInitialized, setIsInitialized] = useState(false);
+  
   // Loading states
   const [loadingChannels, setLoadingChannels] = useState(false);
   const [loadingGroups, setLoadingGroups] = useState(false);
@@ -80,16 +83,54 @@ const EnhancedMessagesWidget = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  // Save selected conversation to localStorage
+  const saveSelectedConversation = (conversation: ChatConversation | null) => {
+    if (conversation) {
+      localStorage.setItem('selectedConversation', JSON.stringify({
+        id: conversation.id,
+        type: conversation.type,
+        name: conversation.name,
+        display_name: conversation.display_name,
+        other_user: conversation.other_user
+      }));
+    } else {
+      localStorage.removeItem('selectedConversation');
+    }
+  };
+
+  // Restore selected conversation from localStorage
+  const restoreSelectedConversation = (conversations: ChatConversation[]) => {
+    try {
+      const saved = localStorage.getItem('selectedConversation');
+      if (saved) {
+        const savedConversation = JSON.parse(saved);
+        const foundConversation = conversations.find(conv => 
+          conv.id === savedConversation.id && 
+          conv.type === savedConversation.type
+        );
+        if (foundConversation) {
+          console.log('🔄 Restoring selected conversation:', foundConversation);
+          setSelectedConversation(foundConversation);
+          return foundConversation;
+        }
+      }
+    } catch (error) {
+      console.error('Error restoring selected conversation:', error);
+    }
+    return null;
+  };
+
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
 
-  // Load all chat data when authenticated
+  // Load conversations when component mounts
   useEffect(() => {
-    if (isAuthenticated) {
+    if (isAuthenticated && !isInitialized) {
       loadChannelsAndDMs();
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, isInitialized]);
+
 
   // Filter DMs based on messages
   useEffect(() => {
@@ -130,8 +171,21 @@ const EnhancedMessagesWidget = () => {
       console.log('💬 DMs loaded:', dmsData);
       console.log('💬 DMs count:', dmsData.length);
       setDirectMessages(dmsData);
+      
+      // Combine all conversations and try to restore selected conversation
+      const allConversations = [...channelsData, ...groupsData, ...dmsData];
+      const restoredConversation = restoreSelectedConversation(allConversations);
+      
+      // If we restored a conversation, load its messages
+      if (restoredConversation) {
+        console.log('🔄 Loading messages for restored conversation:', restoredConversation);
+        await handleConversationSelect(restoredConversation);
+      }
+      
+      setIsInitialized(true);
     } catch (error) {
       console.error('Failed to load channels, groups and DMs:', error);
+      setIsInitialized(true);
     } finally {
       setLoadingChannels(false);
       setLoadingGroups(false);
@@ -142,6 +196,9 @@ const EnhancedMessagesWidget = () => {
   const handleConversationSelect = async (conversation: ChatConversation) => {
     console.log('Selecting conversation:', conversation);
     setSelectedConversation(conversation);
+    
+    // Save the selected conversation to localStorage
+    saveSelectedConversation(conversation);
     setLoadingMessages(true);
 
     try {
@@ -580,6 +637,61 @@ const EnhancedMessagesWidget = () => {
                                   <div className="text-xs opacity-70 mt-1">
                                     {formatMessageTime(message.timestamp)}
                                   </div>
+                                  
+                                  {/* Reactions Display */}
+                                  {message.reactions && Object.keys(message.reactions).length > 0 && (
+                                    <div className="flex flex-wrap gap-1 mt-2">
+                                      {Object.entries(message.reactions).map(([emoji, usernames]) => {
+                                        // Only show reactions that have users
+                                        if (!usernames || usernames.length === 0) return null;
+                                        return (
+                                          <button
+                                            key={emoji}
+                                            className="flex items-center space-x-1 px-2 py-1 rounded-full bg-secondary/50 hover:bg-secondary text-xs"
+                                            onClick={() => handleReactionToggle(message.id, emoji)}
+                                          >
+                                            <span>{emoji}</span>
+                                            <span>{usernames.length}</span>
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                  
+                                  {/* Add Reaction Button */}
+                                  {!isSystemMessage && (
+                                    <div className="flex items-center space-x-2 mt-2">
+                                      <div className="relative">
+                                        <button
+                                          onClick={() => setShowReactionPicker(showReactionPicker === message.id ? null : message.id)}
+                                          className="flex items-center justify-center w-6 h-6 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600 transition-colors"
+                                          title="Add reactions"
+                                        >
+                                          <Smile className="h-4 w-4" />
+                                        </button>
+                                        
+                                        {/* Reaction Picker */}
+                                        {showReactionPicker === message.id && (
+                                          <div className="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-2 z-10">
+                                            <div className="flex gap-1">
+                                              {['👍', '❤️', '😂', '😮', '😢', '😡', '🔥', '💯'].map((emoji) => (
+                                                <button
+                                                  key={emoji}
+                                                  className="text-lg hover:bg-gray-100 rounded p-1 transition-colors"
+                                                  onClick={() => {
+                                                    handleReactionToggle(message.id, emoji);
+                                                    setShowReactionPicker(null);
+                                                  }}
+                                                >
+                                                  {emoji}
+                                                </button>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                               
@@ -668,9 +780,19 @@ const EnhancedMessagesWidget = () => {
             ) : (
               <div className="h-full flex items-center justify-center bg-card rounded-lg border">
                 <div className="text-center text-muted-foreground">
-                  <div className="text-6xl mb-4">💬</div>
-                  <h3 className="text-xl font-semibold mb-2">Select a Conversation</h3>
-                  <p>Choose a conversation from the sidebar to start viewing messages.</p>
+                  {!isInitialized ? (
+                    <>
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+                      <h3 className="text-xl font-semibold mb-2">Loading Messages...</h3>
+                      <p>Restoring your previous conversation...</p>
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-6xl mb-4">💬</div>
+                      <h3 className="text-xl font-semibold mb-2">Select a Conversation</h3>
+                      <p>Choose a conversation from the sidebar to start viewing messages.</p>
+                    </>
+                  )}
                 </div>
               </div>
             )}

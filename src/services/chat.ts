@@ -324,6 +324,22 @@ class ChatService {
     });
   }
 
+  // Toggle reaction (add if not present, remove if present)
+  async toggleReaction(messageId: string, emoji: string): Promise<{ success: boolean }> {
+    try {
+      console.log('Toggling reaction:', { messageId, emoji });
+      const result = await this.request<{ success: boolean }>('/chat/add-reaction', {
+        method: 'POST',
+        body: JSON.stringify({ message_id: messageId, emoji }),
+      });
+      console.log('Toggle reaction result:', result);
+      return result;
+    } catch (error) {
+      console.error('Toggle reaction error:', error);
+      throw error;
+    }
+  }
+
   // Get thread messages for a parent message
   async getThreadMessages(parentMessageId: string): Promise<{ messages: ChatMessage[] }> {
     const params = new URLSearchParams({
