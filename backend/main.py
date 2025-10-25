@@ -816,15 +816,15 @@ async def get_dm_messages(
             # Parse attachments from Rocket.Chat message
             attachments = []
             if msg.get("attachments"):
+                rocket_url = os.getenv('ROCKET_CHAT_URL', 'http://10.68.0.49:30082')
                 for att in msg["attachments"]:
                     image_url = att.get("title_link") or att.get("image_url") or att.get("url")
-                    # Convert relative URLs to proxy URLs
+                    # Convert to full Rocket.Chat URLs
                     if image_url and not image_url.startswith("http"):
-                        image_url = f"/api/rocket-chat/file-proxy{image_url if image_url.startswith('/') else '/' + image_url}"
+                        image_url = f"{rocket_url}{image_url if image_url.startswith('/') else '/' + image_url}"
                     elif image_url and image_url.startswith("http"):
-                        from urllib.parse import urlparse
-                        parsed = urlparse(image_url)
-                        image_url = f"/api/rocket-chat/file-proxy{parsed.path}"
+                        # Already full URL, use as is
+                        pass
                     
                     attachments.append({
                         "id": att.get("_id", ""),
@@ -838,10 +838,11 @@ async def get_dm_messages(
             
             # Also check for file field (single file uploads)
             if msg.get("file"):
+                rocket_url = os.getenv('ROCKET_CHAT_URL', 'http://10.68.0.49:30082')
                 file_data = msg["file"]
                 file_url = file_data.get("url", "")
                 if file_url and not file_url.startswith("http"):
-                    file_url = f"/api/rocket-chat/file-proxy{file_url if file_url.startswith('/') else '/' + file_url}"
+                    file_url = f"{rocket_url}{file_url if file_url.startswith('/') else '/' + file_url}"
                 
                 attachments.append({
                     "id": file_data.get("_id", ""),
@@ -1114,20 +1115,15 @@ async def get_channel_messages_by_id(
                     
                     print(f"DEBUG: Extracted image_url: {image_url}")
                     
-                    # Convert relative URLs to proxy URLs for authenticated access
+                    # Convert to full Rocket.Chat URLs
                     rocket_url = os.getenv('ROCKET_CHAT_URL', 'http://10.68.0.49:30082')
                     if image_url and not image_url.startswith("http"):
-                        # Convert to proxy URL for authenticated access
-                        proxy_path = image_url if image_url.startswith('/') else f'/{image_url}'
-                        image_url = f"/api/rocket-chat/file-proxy{proxy_path}"
-                        print(f"DEBUG: Converted to proxy URL: {image_url}")
+                        # Convert to full Rocket.Chat URL
+                        image_url = f"{rocket_url}{image_url if image_url.startswith('/') else '/' + image_url}"
+                        print(f"DEBUG: Converted to full URL: {image_url}")
                     elif image_url and image_url.startswith("http"):
-                        # Extract the path from full URL for proxy
-                        from urllib.parse import urlparse
-                        parsed = urlparse(image_url)
-                        proxy_path = parsed.path
-                        image_url = f"/api/rocket-chat/file-proxy{proxy_path}"
-                        print(f"DEBUG: Converted full URL to proxy URL: {image_url}")
+                        # Already full URL, use as is
+                        print(f"DEBUG: Using full URL as is: {image_url}")
                     print(f"DEBUG: Final image_url: {image_url}")
                     
                     # Get file type and size - use image_type if available
@@ -1152,10 +1148,11 @@ async def get_channel_messages_by_id(
             
             # Also check for file field (single file uploads)
             if msg.get("file"):
+                rocket_url = os.getenv('ROCKET_CHAT_URL', 'http://10.68.0.49:30082')
                 file_data = msg["file"]
                 file_url = file_data.get("url", "")
                 if file_url and not file_url.startswith("http"):
-                    file_url = f"/api/rocket-chat/file-proxy{file_url if file_url.startswith('/') else '/' + file_url}"
+                    file_url = f"{rocket_url}{file_url if file_url.startswith('/') else '/' + file_url}"
                 
                 attachments.append({
                     "id": file_data.get("_id", ""),
