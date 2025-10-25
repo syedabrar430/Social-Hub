@@ -550,7 +550,8 @@ async def send_thread_message(
 @app.post("/chat/add-reaction")
 async def add_reaction(
     request_data: dict,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """Add reaction to a message"""
     try:
@@ -560,16 +561,19 @@ async def add_reaction(
         if not message_id or not emoji:
             raise HTTPException(status_code=400, detail="message_id and emoji are required")
         
-        authenticated = await rocket_client.ensure_authenticated(
+        # Get user-specific headers for API calls (works for both channels and DMs)
+        user_headers = await rocket_client.get_user_headers(
             social_hub_user_email=current_user.email,
             social_hub_user_name=current_user.full_name,
-            social_hub_user_id=str(current_user.id)
+            social_hub_user_id=str(current_user.id),
+            db_session=db
         )
         
-        if not authenticated:
-            raise HTTPException(status_code=401, detail="Failed to authenticate with Rocket.Chat")
+        if not user_headers:
+            raise HTTPException(status_code=401, detail="Failed to get user authentication headers")
         
-        result = await rocket_client.add_reaction(message_id, emoji)
+        # Use user-specific authentication for reactions
+        result = await rocket_client.add_reaction_with_headers(message_id, emoji, user_headers)
         
         if result.get("success"):
             return {"success": True}
@@ -582,7 +586,8 @@ async def add_reaction(
 @app.post("/chat/remove-reaction")
 async def remove_reaction(
     request_data: dict,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """Remove reaction from a message"""
     try:
@@ -592,7 +597,19 @@ async def remove_reaction(
         if not message_id or not emoji:
             raise HTTPException(status_code=400, detail="message_id and emoji are required")
         
-        result = await rocket_client.remove_reaction(message_id, emoji)
+        # Get user-specific headers for API calls (works for both channels and DMs)
+        user_headers = await rocket_client.get_user_headers(
+            social_hub_user_email=current_user.email,
+            social_hub_user_name=current_user.full_name,
+            social_hub_user_id=str(current_user.id),
+            db_session=db
+        )
+        
+        if not user_headers:
+            raise HTTPException(status_code=401, detail="Failed to get user authentication headers")
+        
+        # Use user-specific authentication for reactions
+        result = await rocket_client.remove_reaction_with_headers(message_id, emoji, user_headers)
         
         if result.get("success"):
             return {"success": True}
@@ -613,6 +630,20 @@ async def test_rocket_chat_connection():
             return {"status": "disconnected", "message": "Cannot connect to Rocket.Chat"}
     except Exception as e:
         return {"status": "error", "message": f"Connection error: {str(e)}"}
+
+@app.post("/chat/create-test-user")
+async def create_test_user():
+    """Create a test Rocket.Chat user"""
+    try:
+        result = await rocket_client.create_user_account(
+            email="test@example.com",
+            username="test",
+            password="testpassword",
+            full_name="Test User"
+        )
+        return result
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 # Rocket.Chat endpoints
 @app.get("/api/rocket-chat/general-messages")

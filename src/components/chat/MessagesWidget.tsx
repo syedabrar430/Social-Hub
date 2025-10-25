@@ -7,6 +7,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { type ChatConversation, type ChatMessage } from '@/services/chat';
 import { chatService } from '@/services/chat';
 import { useToast } from '@/hooks/use-toast';
+import { Smile, Reply } from 'lucide-react';
 
 // Helper function to format message timestamp
 const formatMessageTime = (timestamp: string) => {
@@ -35,8 +36,21 @@ const MessagesWidget = () => {
   const [selectedChannel, setSelectedChannel] = useState<ChatConversation | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
+  const [showReactionPicker, setShowReactionPicker] = useState<string | null>(null);
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
+
+  // Reaction emojis
+  const reactionEmojis = [
+    { emoji: '👍', icon: null, label: 'Thumbs up' },
+    { emoji: '❤️', icon: null, label: 'Heart' },
+    { emoji: '😂', icon: null, label: 'Laughing' },
+    { emoji: '😮', icon: null, label: 'Surprised' },
+    { emoji: '😢', icon: null, label: 'Crying' },
+    { emoji: '😡', icon: null, label: 'Angry' },
+    { emoji: '🔥', icon: null, label: 'Fire' },
+    { emoji: '💯', icon: null, label: '100' }
+  ];
   
   console.log('🔐 Auth status - isAuthenticated:', isAuthenticated, 'authLoading:', authLoading);
   console.log('📺 Selected channel:', selectedChannel);
@@ -126,6 +140,41 @@ const MessagesWidget = () => {
       setLoading(false);
     }
   }, [selectedChannel, isAuthenticated, toast]);
+
+  // Handle reaction toggle
+  const handleReactionToggle = async (messageId: string, emoji: string) => {
+    try {
+      // Check if user already reacted with this emoji
+      const message = messages.find(m => m.id === messageId);
+      if (!message || !message.reactions) return;
+
+      const hasReacted = message.reactions[emoji]?.includes('ankush1'); // Replace with actual current user
+      
+      if (hasReacted) {
+        await chatService.removeReaction(messageId, emoji);
+        toast({
+          title: "Reaction removed",
+          description: `Removed ${emoji} reaction`,
+        });
+      } else {
+        await chatService.addReaction(messageId, emoji);
+        toast({
+          title: "Reaction added",
+          description: `Added ${emoji} reaction`,
+        });
+      }
+      
+      // Reload messages to show updated reactions
+      await loadMessages();
+    } catch (error) {
+      console.error('Failed to toggle reaction:', error);
+      toast({
+        title: "Error",
+        description: "Failed to update reaction",
+        variant: "destructive",
+      });
+    }
+  };
 
   // Load messages when selected channel changes
   useEffect(() => {
@@ -283,12 +332,26 @@ const MessagesWidget = () => {
                                       {Object.entries(message.reactions).map(([emoji, usernames]) => (
                                         <button
                                           key={emoji}
+                                          onClick={() => handleReactionToggle(message.id, emoji)}
                                           className="flex items-center space-x-1 px-2 py-1 rounded-full bg-secondary/50 hover:bg-secondary text-xs"
                                         >
                                           <span>{emoji}</span>
                                           <span>{usernames.length}</span>
                                         </button>
                                       ))}
+                                    </div>
+                                  )}
+                                  
+                                  {/* Action buttons */}
+                                  {!isSystemMessage && (
+                                    <div className="flex items-center space-x-2 mt-2">
+                                      <button
+                                        onClick={() => setShowReactionPicker(showReactionPicker === message.id ? null : message.id)}
+                                        className="text-xs text-muted-foreground hover:text-foreground flex items-center space-x-1"
+                                      >
+                                        <Smile className="h-3 w-3" />
+                                        <span>React</span>
+                                      </button>
                                     </div>
                                   )}
                                   
@@ -300,6 +363,25 @@ const MessagesWidget = () => {
                                   )}
                                 </div>
                               </div>
+                              
+                              {/* Reaction picker */}
+                              {showReactionPicker === message.id && (
+                                <div className="flex space-x-1 mt-2 ml-4">
+                                  {reactionEmojis.map(({ emoji, icon: Icon, label }) => (
+                                    <button
+                                      key={emoji}
+                                      onClick={() => {
+                                        handleReactionToggle(message.id, emoji);
+                                        setShowReactionPicker(null);
+                                      }}
+                                      className="p-1 rounded-full hover:bg-secondary transition-colors"
+                                      title={label}
+                                    >
+                                      <span className="text-lg">{emoji}</span>
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
                               
                               {/* Thread messages */}
                               {message.thread_messages && message.thread_messages.length > 0 && (
