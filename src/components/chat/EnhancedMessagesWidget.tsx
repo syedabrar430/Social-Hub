@@ -81,6 +81,9 @@ const EnhancedMessagesWidget = () => {
   
   // Search
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<ChatMessage[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [showSearchResults, setShowSearchResults] = useState(false);
   
   const { isAuthenticated, user, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
@@ -250,116 +253,24 @@ const EnhancedMessagesWidget = () => {
         });
       });
       
-      // Comprehensive thread message detection function
+      // Simplified thread message detection - only check explicit metadata
       const isThreadMessage = (msg: any): boolean => {
-        // First, log the full message structure for debugging
-        console.log('🔍 Analyzing message for thread detection:', {
-          id: msg.id,
-          text: msg.text,
-          content: msg.content,
-          sender: msg.sender,
-          is_thread_message: msg.is_thread_message,
-          thread_ts: msg.thread_ts,
-          tmid: msg.tmid,
-          timestamp: msg.timestamp,
-          fullMessage: msg
-        });
-        
-        // Check if explicitly marked as thread message
-        if (msg.is_thread_message === true) {
-          console.log('✅ Thread message detected (explicit flag):', msg.id, msg.text);
+        // Only filter messages that have explicit thread metadata
+        if (msg.is_thread_message === true || msg.thread_ts || msg.tmid) {
           return true;
         }
-        
-        // Check for thread message content patterns
-        if (msg.text === 'Thread message' || msg.content === 'Thread message') {
-          console.log('✅ Thread message detected (content match):', msg.id, msg.text);
-          return true;
-        }
-        
-        // Check for thread-related keywords in text
-        if (msg.text && msg.text.toLowerCase().includes('thread')) {
-          console.log('✅ Thread message detected (keyword "thread"):', msg.id, msg.text);
-          return true;
-        }
-        
-        // Check for thread-related keywords in sender
-        if (msg.sender && msg.sender.toLowerCase().includes('thread')) {
-          console.log('✅ Thread message detected (sender contains "thread"):', msg.id, msg.sender);
-          return true;
-        }
-        
-        // Check for very short messages that might be thread replies
-        if (msg.text && msg.text.length <= 10 && !msg.text.includes(' ')) {
-          console.log('✅ Thread message detected (very short message):', msg.id, msg.text);
-          return true;
-        }
-        
-        // More aggressive detection for common thread reply patterns
-        if (msg.text && (
-          msg.text === 'hi' || 
-          msg.text === 'hello' || 
-          msg.text === 'ok' || 
-          msg.text === 'yes' || 
-          msg.text === 'no' || 
-          msg.text === 'thanks' || 
-          msg.text === 'thank you' ||
-          msg.text === 'okay' ||
-          msg.text === 'sure' ||
-          msg.text === 'alright'
-        )) {
-          console.log('✅ Thread message detected (common thread reply):', msg.id, msg.text);
-          return true;
-        }
-        
-        // Check if this message appears in any thread_messages array of other messages
-        // This catches thread messages that might have been flattened
-        if (msg.text && msg.text.length <= 20) {
-          console.log('🔍 Checking if message might be a flattened thread message:', msg.id, msg.text);
-          // For now, let's be more aggressive and remove very short messages
-          if (msg.text.length <= 5) {
-            console.log('✅ Thread message detected (very short message - likely thread reply):', msg.id, msg.text);
-            return true;
-          }
-        }
-        
-        // Check for messages that might be thread replies based on context
-        if (msg.text && (msg.text.includes('reply') || msg.text.includes('re:'))) {
-          console.log('✅ Thread message detected (reply indicators):', msg.id, msg.text);
-          return true;
-        }
-        
-        // Check for messages with thread-related metadata
-        if (msg.thread_ts || msg.tmid) {
-          console.log('✅ Thread message detected (thread metadata):', msg.id, msg.text);
-          return true;
-        }
-        
-        // Check for messages that are likely thread replies based on timestamp proximity
-        // (This is a heuristic - thread messages often appear close together)
-        const messageTime = new Date(msg.timestamp).getTime();
-        const now = Date.now();
-        const timeDiff = now - messageTime;
-        
-        // If message is very recent and very short, it might be a thread reply
-        if (timeDiff < 60000 && msg.text && msg.text.length <= 15) { // Within last minute and short
-          console.log('✅ Thread message detected (recent short message):', msg.id, msg.text);
-          return true;
-        }
-        
-        console.log('❌ Message NOT detected as thread message:', msg.id, msg.text);
         return false;
       };
       
-      // Filter out thread messages from the main message list
+      // Filter out thread messages from the main message list (only those with explicit thread metadata)
       const filteredMessages = conversationMessages.filter(msg => {
         if (isThreadMessage(msg)) {
-          console.log('Filtering out thread message:', msg.id, msg.text, msg.sender);
           return false;
         }
         return true;
       });
-      console.log('Filtered messages count (excluding thread messages):', filteredMessages.length);
+      console.log('Total messages loaded:', conversationMessages.length);
+      console.log('Filtered messages (excluding thread messages):', filteredMessages.length);
       setMessages(filteredMessages);
     } catch (error) {
       console.error('Failed to load messages:', error);
@@ -494,8 +405,8 @@ const EnhancedMessagesWidget = () => {
       if (selectedConversation.type === 'direct_message' && selectedConversation.other_user) {
         // Use the conversation name (Rocket.Chat username) for sending DMs
         const username = selectedConversation.name || selectedConversation.other_user;
-        console.log('Sending DM to username:', username, 'display_name:', selectedConversation.other_user);
-        await rocketChatService.sendDirectMessage(username, messageContent);
+        console.log('Sending DM to username:', username, 'display_name:', selectedConversation.other_user, 'with attachments:', uploadedFiles);
+        await rocketChatService.sendDirectMessage(username, messageContent, uploadedFiles);
       } else {
         console.log('DEBUG: Calling sendRocketChatChannelMessage with:', {
           channelIdentifier: selectedConversation.name || selectedConversation.id,
@@ -529,13 +440,22 @@ const EnhancedMessagesWidget = () => {
       };
       
       console.log('Adding sent message to UI:', newMessageObj);
-      setMessages(prev => [...prev, newMessageObj]);
+      setMessages(prev => {
+        const updated = [...prev, newMessageObj];
+        console.log('Updated messages count:', updated.length);
+        return updated;
+      });
       
       // Show success message with file count
       if (uploadedFiles.length > 0) {
         toast({
           title: "Message sent",
           description: `Message sent with ${uploadedFiles.length} file(s)`,
+        });
+      } else if (messageContent.trim()) {
+        toast({
+          title: "Message sent",
+          description: "Message sent successfully",
         });
       }
       
@@ -657,6 +577,18 @@ const EnhancedMessagesWidget = () => {
       setThreadMessages(prev => ({
         ...prev,
         [parentMessageId]: [...(prev[parentMessageId] || []), newThreadMessage]
+      }));
+      
+      // Update the thread count on the parent message
+      setMessages(prev => prev.map(msg => {
+        if (msg.id === parentMessageId) {
+          const currentCount = msg.thread_count || 0;
+          return {
+            ...msg,
+            thread_count: currentCount + 1
+          };
+        }
+        return msg;
       }));
     } catch (error) {
       console.error('Failed to send thread reply:', error);
@@ -800,18 +732,96 @@ const EnhancedMessagesWidget = () => {
                 <div className="relative">
                   <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                   <Input
-                    placeholder="Search conversations..."
+                    placeholder="Search messages..."
                     value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onChange={async (e) => {
+                      const query = e.target.value;
+                      setSearchQuery(query);
+                      
+                      if (query.trim().length >= 2) {
+                        setIsSearching(true);
+                        setShowSearchResults(true);
+                        try {
+                          const results = await rocketChatService.searchMessages(query, 50);
+                          setSearchResults(results.messages || []);
+                        } catch (error) {
+                          console.error('Search failed:', error);
+                          setSearchResults([]);
+                        } finally {
+                          setIsSearching(false);
+                        }
+                      } else if (query.trim().length === 0) {
+                        setShowSearchResults(false);
+                        setSearchResults([]);
+                      }
+                    }}
+                    onKeyPress={(e) => {
+                      if (e.key === 'Enter' && searchQuery.trim().length >= 2) {
+                        // Trigger search
+                      }
+                    }}
                     className="pl-10"
                   />
                 </div>
               </div>
 
-              {/* Conversations List */}
+              {/* Conversations List or Search Results */}
               <ScrollArea className="h-[calc(100vh-300px)]">
                 <div className="p-4 space-y-2">
-                  {filteredConversations.length === 0 ? (
+                  {showSearchResults ? (
+                    // Show search results
+                    <>
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="font-medium text-sm text-gray-700">Search Results</h3>
+                        {isSearching && <div className="text-xs text-gray-500">Searching...</div>}
+                      </div>
+                      {searchResults.length === 0 ? (
+                        <div className="flex justify-center items-center h-20">
+                          <div className="text-sm text-gray-500 text-center">
+                            No messages found
+                          </div>
+                        </div>
+                      ) : (
+                        searchResults.map((message) => (
+                          <div
+                            key={message.id}
+                            className="p-3 rounded-lg border bg-gray-50 hover:bg-gray-100 cursor-pointer transition-colors"
+                            onClick={() => {
+                              // Find the conversation for this message
+                              const roomId = (message as any).room_id;
+                              const roomName = (message as any).room_name;
+                              const roomType = (message as any).room_type;
+                              
+                              // Try to find the conversation in our lists
+                              let targetConversation = channels.find(c => c.id === roomId);
+                              if (!targetConversation) {
+                                targetConversation = groups.find(g => g.id === roomId);
+                              }
+                              if (!targetConversation) {
+                                targetConversation = directMessages.find(dm => dm.id === roomId);
+                              }
+                              
+                              if (targetConversation) {
+                                handleConversationSelect(targetConversation);
+                                setShowSearchResults(false);
+                                setSearchQuery('');
+                              }
+                            }}
+                          >
+                            <div className="text-xs text-gray-500 mb-1">
+                              {(message as any).room_name || 'Unknown'} • {formatMessageTime(message.timestamp)}
+                            </div>
+                            <div className="text-sm font-medium text-gray-700 mb-1">
+                              {message.user?.name || message.user?.username || 'Unknown'}
+                            </div>
+                            <div className="text-sm text-gray-600 truncate">
+                              {message.text || message.content}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </>
+                  ) : filteredConversations.length === 0 ? (
                     <div className="flex justify-center items-center h-20">
                       <div className="text-sm text-gray-500 text-center">
                         No conversations found
@@ -938,69 +948,13 @@ const EnhancedMessagesWidget = () => {
                               timestamp: msg.timestamp
                             });
                             
+                            // Only check for explicit thread metadata - no heuristics
                             if (msg.is_thread_message === true) {
                               console.log('✅ Rendering: Thread message detected (explicit flag)');
                               return true;
                             }
-                            if (msg.text === 'Thread message' || msg.content === 'Thread message') {
-                              console.log('✅ Rendering: Thread message detected (content match)');
-                              return true;
-                            }
-                            if (msg.text && msg.text.toLowerCase().includes('thread')) {
-                              console.log('✅ Rendering: Thread message detected (keyword "thread")');
-                              return true;
-                            }
-                            if (msg.sender && msg.sender.toLowerCase().includes('thread')) {
-                              console.log('✅ Rendering: Thread message detected (sender contains "thread")');
-                              return true;
-                            }
-                            if (msg.text && msg.text.length <= 10 && !msg.text.includes(' ')) {
-                              console.log('✅ Rendering: Thread message detected (very short message)');
-                              return true;
-                            }
-                            
-                            // More aggressive detection for common thread reply patterns
-                            if (msg.text && (
-                              msg.text === 'hi' || 
-                              msg.text === 'hello' || 
-                              msg.text === 'ok' || 
-                              msg.text === 'yes' || 
-                              msg.text === 'no' || 
-                              msg.text === 'thanks' || 
-                              msg.text === 'thank you' ||
-                              msg.text === 'okay' ||
-                              msg.text === 'sure' ||
-                              msg.text === 'alright'
-                            )) {
-                              console.log('✅ Rendering: Thread message detected (common thread reply)');
-                              return true;
-                            }
-                            
-                            // Check if this message appears in any thread_messages array of other messages
-                            // This catches thread messages that might have been flattened
-                            if (msg.text && msg.text.length <= 20) {
-                              console.log('🔍 Rendering: Checking if message might be a flattened thread message:', msg.id, msg.text);
-                              // For now, let's be more aggressive and remove very short messages
-                              if (msg.text.length <= 5) {
-                                console.log('✅ Rendering: Thread message detected (very short message - likely thread reply)');
-                                return true;
-                              }
-                            }
-                            if (msg.text && (msg.text.includes('reply') || msg.text.includes('re:'))) {
-                              console.log('✅ Rendering: Thread message detected (reply indicators)');
-                              return true;
-                            }
                             if (msg.thread_ts || msg.tmid) {
                               console.log('✅ Rendering: Thread message detected (thread metadata)');
-                              return true;
-                            }
-                            
-                            // Recent short message heuristic
-                            const messageTime = new Date(msg.timestamp).getTime();
-                            const now = Date.now();
-                            const timeDiff = now - messageTime;
-                            if (timeDiff < 60000 && msg.text && msg.text.length <= 15) {
-                              console.log('✅ Rendering: Thread message detected (recent short message)');
                               return true;
                             }
                             
@@ -1036,6 +990,18 @@ const EnhancedMessagesWidget = () => {
                           }
                           
                           const isSystemMessage = message.type === 'system';
+                          
+                          // Debug system messages
+                          if (isSystemMessage) {
+                            console.log('🔄 System message detected:', {
+                              id: message.id,
+                              type: message.type,
+                              text: message.text,
+                              content: message.content,
+                              sender: message.sender,
+                              user: message.user
+                            });
+                          }
                           
                           // Determine if this message is from the current user
                           const currentUserUsername = user?.email?.split('@')[0]; // e.g., 'ankush8'
@@ -1090,27 +1056,98 @@ const EnhancedMessagesWidget = () => {
                                   {/* File Attachments Display */}
                                   {message.attachments && message.attachments.length > 0 && (
                                     <div className="mt-2 space-y-2">
-                                      {message.attachments.map((attachment: any, index: number) => (
-                                        <div key={index} className="flex items-center space-x-2 p-2 bg-gray-50 rounded-lg border">
-                                          <File className="h-4 w-4 text-blue-600" />
-                                          <div className="flex-1 min-w-0">
-                                            <p className="text-sm font-medium text-gray-900 truncate">
-                                              {attachment.title || attachment.filename || 'File'}
-                                            </p>
-                                            <p className="text-xs text-gray-500">
-                                              {attachment.size ? `${(attachment.size / 1024).toFixed(1)} KB` : 'Unknown size'}
-                                            </p>
+                                      {message.attachments.map((attachment: any, index: number) => {
+                                        // Check if attachment is an image
+                                        const isImage = attachment.type && attachment.type.startsWith('image/');
+                                        const isImageFile = attachment.filename && 
+                                          /\.(jpg|jpeg|png|gif|webp|bmp|svg)$/i.test(attachment.filename);
+                                        
+                                        // For images, show full size
+                                        if (isImage || isImageFile) {
+                                          // Use base64 preview for instant display (it's full quality)
+                                          const imageUrl = attachment.preview || attachment.url;
+                                          
+                                          console.log('🎨 Rendering image attachment:', {
+                                            filename: attachment.filename,
+                                            type: attachment.type,
+                                            hasPreview: !!attachment.preview,
+                                            hasUrl: !!attachment.url,
+                                            usingPreview: !!attachment.preview
+                                          });
+                                          
+                                          return (
+                                            <div key={index} className="relative group">
+                                              {imageUrl && (
+                                                <>
+                                                  <img 
+                                                    src={imageUrl} 
+                                                    alt={attachment.title || attachment.filename || 'Image'} 
+                                                    className="max-w-2xl rounded-lg border border-gray-200"
+                                                    style={{ maxHeight: '600px', width: 'auto' }}
+                                                    onError={(e) => {
+                                                      console.error('❌ Image failed to load:', imageUrl);
+                                                      // Try the other URL if one fails
+                                                      if (attachment.url && imageUrl === attachment.preview) {
+                                                        console.log('🔄 Trying full URL as fallback');
+                                                        (e.target as HTMLImageElement).src = attachment.url;
+                                                      } else if (attachment.preview && imageUrl === attachment.url) {
+                                                        console.log('🔄 Trying preview as fallback');
+                                                        (e.target as HTMLImageElement).src = attachment.preview;
+                                                      }
+                                                    }}
+                                                    onLoad={() => {
+                                                      console.log('✅ Image loaded successfully');
+                                                    }}
+                                                  />
+                                                  
+                                                  {/* Download button */}
+                                                  <button
+                                                    onClick={(e) => {
+                                                      e.stopPropagation();
+                                                      const link = document.createElement('a');
+                                                      link.href = imageUrl;
+                                                      link.download = attachment.filename || attachment.title || 'image.jpg';
+                                                      link.target = '_blank';
+                                                      document.body.appendChild(link);
+                                                      link.click();
+                                                      document.body.removeChild(link);
+                                                    }}
+                                                    className="absolute top-2 right-2 bg-gray-800 hover:bg-gray-900 text-white p-2 rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                                                    title="Download image"
+                                                  >
+                                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                                    </svg>
+                                                  </button>
+                                                </>
+                                              )}
+                                            </div>
+                                          );
+                                        }
+                                        
+                                        // For non-image files, show file info with download button
+                                        return (
+                                          <div key={index} className="flex items-center space-x-2 p-2 bg-gray-50 rounded-lg border">
+                                            <File className="h-4 w-4 text-blue-600" />
+                                            <div className="flex-1 min-w-0">
+                                              <p className="text-sm font-medium text-gray-900 truncate">
+                                                {attachment.title || attachment.filename || 'File'}
+                                              </p>
+                                              <p className="text-xs text-gray-500">
+                                                {attachment.size ? `${(attachment.size / 1024).toFixed(1)} KB` : 'Unknown size'}
+                                              </p>
+                                            </div>
+                                            <Button
+                                              variant="ghost"
+                                              size="sm"
+                                              onClick={() => window.open(attachment.url, '_blank')}
+                                              className="text-blue-600 hover:text-blue-800"
+                                            >
+                                              Download
+                                            </Button>
                                           </div>
-                                          <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => window.open(attachment.url, '_blank')}
-                                            className="text-blue-600 hover:text-blue-800"
-                                          >
-                                            Download
-                                          </Button>
-                                        </div>
-                                      ))}
+                                        );
+                                      })}
                                     </div>
                                   )}
                                   
@@ -1191,10 +1228,16 @@ const EnhancedMessagesWidget = () => {
                                               handleLoadThread(message.id);
                                             }
                                           }}
-                                          className="flex items-center justify-center w-6 h-6 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600 transition-colors"
+                                          className="flex items-center justify-center w-6 h-6 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600 transition-colors relative"
                                           title="Reply in thread"
                                         >
                                           <Reply className="h-4 w-4" />
+                                          {/* Thread count badge */}
+                                          {(message.thread_count && message.thread_count > 0) && (
+                                            <span className="absolute -top-1 -right-1 bg-blue-600 text-white text-[10px] font-bold rounded-full min-w-[16px] h-4 px-1 flex items-center justify-center">
+                                              {message.thread_count}
+                                            </span>
+                                          )}
                                         </button>
                                       </div>
                                     </div>

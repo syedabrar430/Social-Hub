@@ -1142,6 +1142,47 @@ async def get_channel_messages_by_id(
                     display_emoji = emoji_display_map.get(emoji, emoji)
                     reactions[display_emoji] = reaction_data.get("usernames", [])
             
+            # Debug: Print all message keys and values
+            print(f"\n{'='*50}")
+            print(f"DEBUG: Message {i} details:")
+            print(f"  ID: {msg.get('_id')}")
+            print(f"  Type (t): {msg.get('t')}")
+            print(f"  User (u): {msg.get('u')}")
+            print(f"  Message text (msg): '{msg.get('msg', '')[:50]}'")
+            print(f"  Has attachments: {bool(msg.get('attachments'))}")
+            print(f"{'='*50}\n")
+            
+            # Check if this is a system event (like "user joined")
+            event_type = msg.get("t")
+            is_system_event = event_type and event_type in ["uj", "ul", "r", "au", "ru"]  # user_joined, user_left, room_changed, user_added, user_removed
+            
+            # Get message text - handle system events differently
+            message_text = msg.get("msg", "")
+            
+            # Generate custom messages for system events
+            if is_system_event and not message_text:
+                username = msg.get("u", {}).get("username", "Unknown")
+                print(f"🔄 DEBUG: Processing system event '{event_type}' for user '{username}'")
+                if event_type == "uj":
+                    message_text = f"{username} joined the channel"
+                elif event_type == "ul":
+                    message_text = f"{username} left the channel"
+                elif event_type == "r":
+                    message_text = f"Room changed"
+                elif event_type == "au":
+                    message_text = f"{username} was added"
+                elif event_type == "ru":
+                    message_text = f"{username} was removed"
+                print(f"✅ DEBUG: Generated custom message: '{message_text}'")
+            
+            # If msg is still empty and it's a system event, check attachments for the text
+            if not message_text and is_system_event and msg.get("attachments"):
+                for att in msg.get("attachments", []):
+                    if att.get("text"):
+                        message_text = att.get("text")
+                        print(f"DEBUG: Found system event text in attachment: '{message_text}' (event type: {event_type})")
+                        break
+            
             # Parse attachments from Rocket.Chat message
             attachments = []
             if msg.get("attachments"):
@@ -1205,7 +1246,7 @@ async def get_channel_messages_by_id(
             
             formatted_message = {
                 "id": msg.get("_id", f"msg-{i}"),
-                "text": msg.get("msg", ""),
+                "text": message_text,
                 "user": {
                     "id": user_data.get("_id", "unknown"),
                     "username": user_data.get("username", "Unknown"),
@@ -1217,7 +1258,7 @@ async def get_channel_messages_by_id(
                 "thread_count": thread_count,
                 "thread_ts": msg.get("tmid"),
                 "thread_messages": thread_messages,  # Include thread messages
-                "type": "system" if is_system else "message",
+                "type": "system" if is_system_event else "message",
                 "attachments": attachments if attachments else None
             }
             formatted_messages.append(formatted_message)

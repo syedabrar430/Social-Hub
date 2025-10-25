@@ -290,11 +290,11 @@ class ChatService {
   }
 
   // Send direct message to a user
-  async sendDirectMessage(username: string, text: string): Promise<{ success: boolean; message: string }> {
+  async sendDirectMessage(username: string, text: string, attachments: any[] = []): Promise<{ success: boolean; message: string }> {
     try {
       return this.request<{ success: boolean; message: string }>('/api/rocket-chat/send-dm', {
         method: 'POST',
-        body: JSON.stringify({ username, message: text }),
+        body: JSON.stringify({ username, message: text, attachments }),
       });
     } catch (error) {
       console.error('Failed to send direct message:', error);
@@ -414,6 +414,16 @@ class ChatService {
       console.error('Failed to send image:', error);
       throw error;
     }
+  }
+
+  // Search for messages across all channels and DMs
+  async searchMessages(query: string, limit: number = 50): Promise<{ messages: ChatMessage[], count: number }> {
+    const params = new URLSearchParams({
+      query,
+      limit: limit.toString(),
+    });
+    
+    return this.request<{ messages: ChatMessage[], count: number }>(`/api/rocket-chat/search-messages?${params}`);
   }
 
   // Utility methods
