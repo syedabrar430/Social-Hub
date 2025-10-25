@@ -542,7 +542,7 @@ class RocketChatClient:
             return {"success": False, "error": str(e)}
 
     async def get_channel_messages(self, channel_identifier: str, count: int = 50, channel_type: str = "channel") -> List[Dict]:
-        """Get messages from a channel"""
+        """Get messages from a channel with pagination to fetch all messages"""
         try:
             if not await self.ensure_authenticated():
                 return []
@@ -551,24 +551,44 @@ class RocketChatClient:
             if not room_id:
                 return []
             
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    f"{self.base_url}/api/v1/channels.messages",
-                    headers=self.headers,
-                    params={
-                        "roomId": room_id,
-                        "count": count
-                    }
-                )
-                
-                if response.status_code == 200:
-                    result = response.json()
-                    if result.get('success'):
-                        return result.get('messages', [])
+            all_messages = []
+            offset = 0
+            batch_size = 100  # Fetch in batches of 100
+            
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                while True:
+                    response = await client.get(
+                        f"{self.base_url}/api/v1/channels.messages",
+                        headers=self.headers,
+                        params={
+                            "roomId": room_id,
+                            "count": batch_size,
+                            "offset": offset
+                        }
+                    )
+                    
+                    if response.status_code == 200:
+                        result = response.json()
+                        if result.get('success'):
+                            messages = result.get('messages', [])
+                            if not messages:
+                                # No more messages
+                                break
+                            all_messages.extend(messages)
+                            
+                            # Check if we got fewer messages than requested (last batch)
+                            if len(messages) < batch_size:
+                                break
+                            
+                            offset += batch_size
+                        else:
+                            break
                     else:
-                        return []
-                else:
-                    return []
+                        print(f"Failed to fetch messages: HTTP {response.status_code}")
+                        break
+            
+            print(f"✅ Fetched {len(all_messages)} total messages from {channel_identifier}")
+            return all_messages
                     
         except Exception as e:
             print(f"Exception getting channel messages: {e}")
@@ -874,7 +894,7 @@ class RocketChatClient:
             return None
 
     async def get_dm_messages(self, username: str, count: int = 50, user_headers: Dict = None) -> List[Dict]:
-        """Get direct messages with a specific user"""
+        """Get direct messages with a specific user with pagination to fetch all messages"""
         try:
             # Must use user-specific headers - no fallback to admin
             if not user_headers:
@@ -890,30 +910,46 @@ class RocketChatClient:
                 print(f"❌ Could not get DM room ID with {username}")
                 return []
             
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(
-                    f"{self.base_url}/api/v1/im.messages",
-                    headers=headers,
-                    params={
-                        "roomId": room_id,
-                        "count": count
-                    }
-                )
-                
-                print(f"DEBUG: DM messages API response status: {response.status_code}")
-                
-                if response.status_code == 200:
-                    result = response.json()
-                    if result.get('success'):
-                        messages = result.get('messages', [])
-                        print(f"DEBUG: Retrieved {len(messages)} DM messages")
-                        return messages
+            all_messages = []
+            offset = 0
+            batch_size = 100  # Fetch in batches of 100
+            
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                while True:
+                    response = await client.get(
+                        f"{self.base_url}/api/v1/im.messages",
+                        headers=headers,
+                        params={
+                            "roomId": room_id,
+                            "count": batch_size,
+                            "offset": offset
+                        }
+                    )
+                    
+                    print(f"DEBUG: DM messages API response status: {response.status_code}")
+                    
+                    if response.status_code == 200:
+                        result = response.json()
+                        if result.get('success'):
+                            messages = result.get('messages', [])
+                            if not messages:
+                                # No more messages
+                                break
+                            all_messages.extend(messages)
+                            
+                            # Check if we got fewer messages than requested (last batch)
+                            if len(messages) < batch_size:
+                                break
+                            
+                            offset += batch_size
+                        else:
+                            break
                     else:
-                        print(f"DEBUG: API returned success=false: {result}")
-                        return []
-                else:
-                    print(f"DEBUG: DM messages API error: {response.status_code} - {response.text[:200]}")
-                    return []
+                        print(f"DEBUG: DM messages API error: {response.status_code} - {response.text[:200]}")
+                        break
+            
+            print(f"✅ Fetched {len(all_messages)} total DM messages with {username}")
+            return all_messages
                     
         except Exception as e:
             print(f"Exception getting DM messages with {username}: {e}")

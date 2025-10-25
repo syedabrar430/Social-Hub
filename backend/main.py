@@ -740,7 +740,7 @@ async def send_message_to_general(
 @app.get("/api/rocket-chat/dm-messages")
 async def get_dm_messages(
     username: str,
-    limit: int = 50,
+    limit: int = 1000,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -813,6 +813,42 @@ async def get_dm_messages(
             # Use username if available, otherwise fall back to display name
             sender_name = username or display_name
             
+            # Get thread count and check if we should include thread messages
+            thread_count = msg.get("tcount", 0)
+            thread_messages = []
+            
+            # Only fetch thread messages if there are more than 0 messages in the thread
+            if thread_count > 0:
+                try:
+                    thread_response = await rocket_client.get_thread_messages(msg.get("_id", ""))
+                    if thread_response:
+                        for thread_msg in thread_response:
+                            if isinstance(thread_msg, dict):
+                                thread_user_data = thread_msg.get("u", {})
+                                thread_timestamp = thread_msg.get("ts", "")
+                                if isinstance(thread_timestamp, dict):
+                                    thread_timestamp = thread_timestamp.get("$date", "")
+                                elif thread_timestamp:
+                                    thread_timestamp = str(thread_timestamp)
+                                else:
+                                    thread_timestamp = "2024-01-01T00:00:00.000Z"
+                                
+                                thread_messages.append({
+                                    "id": thread_msg.get("_id", ""),
+                                    "text": thread_msg.get("msg", ""),
+                                    "user": {
+                                        "id": thread_user_data.get("_id", ""),
+                                        "username": thread_user_data.get("username", "unknown"),
+                                        "name": thread_user_data.get("name", thread_user_data.get("username", "Unknown User"))
+                                    },
+                                    "timestamp": thread_timestamp,
+                                    "edited_at": thread_msg.get("_updatedAt"),
+                                    "reactions": thread_msg.get("reactions", {}),
+                                    "is_thread_message": True
+                                })
+                except Exception as e:
+                    print(f"DEBUG: Failed to fetch thread messages for {msg.get('_id', '')}: {e}")
+            
             # Parse attachments from Rocket.Chat message
             attachments = []
             if msg.get("attachments"):
@@ -863,6 +899,9 @@ async def get_dm_messages(
                 "avatar": None,
                 "type": "message",
                 "reactions": reactions,
+                "thread_count": thread_count,
+                "thread_ts": msg.get("tmid"),
+                "thread_messages": thread_messages,  # Include thread messages
                 "attachments": attachments if attachments else None
             }
             formatted_messages.append(formatted_message)
@@ -1008,7 +1047,7 @@ async def get_all_channels(current_user: User = Depends(get_current_user)):
 @app.get("/api/rocket-chat/channel-messages/{channel_identifier}")
 async def get_channel_messages_by_id(
     channel_identifier: str,
-    limit: int = 50,
+    limit: int = 1000,
     channel_type: str = "channel",
     current_user: User = Depends(get_current_user)
 ):
@@ -1558,6 +1597,136 @@ async def upload_files(
     except Exception as e:
         print(f"Error uploading files: {e}")
         raise HTTPException(status_code=500, detail=f"File upload failed: {str(e)}")
+
+@app.get("/api/rocket-chat/search-messages")
+async def search_messages(
+    query: str,
+    limit: int = 50,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Search for messages across all channels and DMs using Social Hub's built-in search"""
+    try:
+        print(f"DEBUG: Searching for '{query}' for user: {current_user.email}")
+        
+        # Get user-specific headers for API calls
+        user_headers = await rocket_client.get_user_headers(
+            social_hub_user_email=current_user.email,
+            social_hub_user_name=current_user.full_name,
+            social_hub_user_id=str(current_user.id),
+            db_session=db
+        )
+        
+        if not user_headers:
+            raise HTTPException(status_code=401, detail="Failed to get user authentication")
+        
+        # Get all rooms the user has access to
+        rooms = await rocket_client.get_all_user_rooms(user_headers=user_headers)
+        
+        # Search through all channels and DMs
+        all_messages = []
+        
+        # Search in channels
+        for channel in rooms.get('channels', []):
+            try:
+                channel_name = channel.get('name')
+                channel_id = channel.get('id')
+                messages = await rocket_client.get_channel_messages(channel_name, count=200)
+                for msg in messages:
+                    msg['room_id'] = channel_id
+                    msg['room_name'] = channel.get('name', '')
+                    msg['room_type'] = 'channel'
+                    all_messages.append(msg)
+            except Exception as e:
+                print(f"DEBUG: Error getting messages from channel {channel.get('name')}: {e}")
+                continue
+        
+        # Search in groups (private groups)
+        for group in rooms.get('groups', []):
+            try:
+                group_name = group.get('name')
+                group_id = group.get('id')
+                messages = await rocket_client.get_channel_messages(group_name, count=200, channel_type='private_group')
+                for msg in messages:
+                    msg['room_id'] = group_id
+                    msg['room_name'] = group.get('name', '')
+                    msg['room_type'] = 'private_group'
+                    all_messages.append(msg)
+            except Exception as e:
+                print(f"DEBUG: Error getting messages from group {group.get('name')}: {e}")
+                continue
+        
+        # Search in DMs
+        for dm in rooms.get('direct_messages', []):
+            try:
+                dm_name = dm.get('name')
+                dm_id = dm.get('id')
+                messages = await rocket_client.get_dm_messages(dm_name, count=200, user_headers=user_headers)
+                for msg in messages:
+                    msg['room_id'] = dm_id
+                    msg['room_name'] = dm.get('display_name', '')
+                    msg['room_type'] = 'direct_message'
+                    all_messages.append(msg)
+            except Exception as e:
+                print(f"DEBUG: Error getting messages from DM {dm.get('name')}: {e}")
+                continue
+        
+        # Filter messages by search query
+        query_lower = query.lower()
+        matching_messages = []
+        
+        for msg in all_messages:
+            message_text = msg.get('msg', '').lower()
+            if query_lower in message_text:
+                # Format message for frontend
+                user_data = msg.get("u", {})
+                timestamp = msg.get("ts", "")
+                
+                if isinstance(timestamp, dict):
+                    timestamp = timestamp.get("$date", "")
+                elif timestamp:
+                    timestamp = str(timestamp)
+                else:
+                    timestamp = "2024-01-01T00:00:00.000Z"
+                
+                formatted_message = {
+                    "id": msg.get("_id", ""),
+                    "text": msg.get("msg", ""),
+                    "content": msg.get("msg", ""),
+                    "sender": user_data.get("username", "unknown"),
+                    "user": {
+                        "id": user_data.get("_id", ""),
+                        "username": user_data.get("username", "unknown"),
+                        "name": user_data.get("name", user_data.get("username", "Unknown User"))
+                    },
+                    "timestamp": timestamp,
+                    "edited_at": msg.get("_updatedAt"),
+                    "reactions": msg.get("reactions", {}),
+                    "thread_count": msg.get("tcount", 0),
+                    "room_id": msg.get("room_id", ""),
+                    "room_name": msg.get("room_name", ""),
+                    "room_type": msg.get("room_type", "")
+                }
+                
+                matching_messages.append(formatted_message)
+        
+        # Sort by timestamp (most recent first) and limit results
+        matching_messages.sort(key=lambda x: x['timestamp'], reverse=True)
+        matching_messages = matching_messages[:limit]
+        
+        print(f"DEBUG: Found {len(matching_messages)} messages matching '{query}'")
+        
+        return {
+            "success": True,
+            "messages": matching_messages,
+            "count": len(matching_messages)
+        }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error searching messages: {e}")
+        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
