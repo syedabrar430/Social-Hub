@@ -876,18 +876,18 @@ class RocketChatClient:
     async def get_dm_messages(self, username: str, count: int = 50, user_headers: Dict = None) -> List[Dict]:
         """Get direct messages with a specific user"""
         try:
-            # Use user-specific headers if provided, otherwise use default headers
-            headers = user_headers if user_headers else self.headers
+            # Must use user-specific headers - no fallback to admin
+            if not user_headers:
+                print("❌ No user headers provided for DM messages - cannot retrieve DMs without user authentication")
+                return []
             
-            # If we have user headers, we're already authenticated as that user
-            if user_headers:
-                print(f"✅ Using user-specific headers for DM messages")
-            else:
-                if not await self.ensure_authenticated():
-                    return []
+            # Use user-specific headers
+            headers = user_headers
+            print(f"✅ Using user-specific headers for DM messages")
             
             room_id = await self.create_or_get_dm_room(username, user_headers)
             if not room_id:
+                print(f"❌ Could not get DM room ID with {username}")
                 return []
             
             async with httpx.AsyncClient(timeout=30.0) as client:
@@ -900,36 +900,106 @@ class RocketChatClient:
                     }
                 )
                 
+                print(f"DEBUG: DM messages API response status: {response.status_code}")
+                
                 if response.status_code == 200:
                     result = response.json()
                     if result.get('success'):
-                        return result.get('messages', [])
+                        messages = result.get('messages', [])
+                        print(f"DEBUG: Retrieved {len(messages)} DM messages")
+                        return messages
                     else:
+                        print(f"DEBUG: API returned success=false: {result}")
                         return []
                 else:
+                    print(f"DEBUG: DM messages API error: {response.status_code} - {response.text[:200]}")
                     return []
                     
         except Exception as e:
             print(f"Exception getting DM messages with {username}: {e}")
+            import traceback
+            traceback.print_exc()
             return []
 
-    async def send_direct_message(self, username: str, text: str, user_headers: Dict = None) -> Dict:
-        """Send a direct message to a specific user"""
+    async def send_direct_message(self, username: str, text: str, user_headers: Dict = None, attachments: List[Dict] = None) -> Dict:
+        """Send a direct message to a specific user with optional file attachments"""
         try:
-            # Use user-specific headers if provided, otherwise use default headers
-            headers = user_headers if user_headers else self.headers
+            # Must use user-specific headers - no fallback to admin
+            if not user_headers:
+                print("❌ No user headers provided for DM sending - cannot send DMs without user authentication")
+                return {"success": False, "error": "User authentication required"}
             
-            # If we have user headers, we're already authenticated as that user
-            if user_headers:
-                print(f"✅ Using user-specific headers for DM sending")
-            else:
-                if not await self.ensure_authenticated():
-                    return {"success": False, "error": "Failed to authenticate with Rocket.Chat"}
+            # Use user-specific headers
+            headers = user_headers
+            print(f"✅ Using user-specific headers for DM sending")
             
             room_id = await self.create_or_get_dm_room(username, user_headers)
             if not room_id:
                 return {"success": False, "error": f"Could not get DM room with {username}"}
             
+            # If we have attachments, upload them to Rocket.Chat first
+            if attachments and len(attachments) > 0:
+                print(f"DEBUG: Uploading {len(attachments)} files to Rocket.Chat for DM")
+                uploaded_file_ids = []
+                
+                for att in attachments:
+                    try:
+                        print(f"DEBUG: Processing attachment: {att}")
+                        # Download the file from our server
+                        async with httpx.AsyncClient(timeout=30.0) as client:
+                            print(f"DEBUG: Downloading file from: {att.get('url')}")
+                            file_response = await client.get(att.get("url", ""))
+                            print(f"DEBUG: File download response status: {file_response.status_code}")
+                            if file_response.status_code == 200:
+                                file_content = file_response.content
+                                file_name = att.get("filename", "attachment")
+                                file_size = len(file_content)
+                                print(f"DEBUG: Downloaded file: {file_name}, size: {file_size} bytes")
+                                
+                                # Upload to Rocket.Chat using rooms.upload endpoint
+                                files = {"file": (file_name, file_content, att.get("type", "application/octet-stream"))}
+                                data = {
+                                    "msg": text,
+                                    "description": f"Uploaded file: {file_name}"
+                                }
+                                print(f"DEBUG: Uploading to Rocket.Chat DM: {self.base_url}/api/v1/rooms.upload/{room_id}")
+                                
+                                # Remove Content-Type header for multipart upload
+                                upload_headers = {k: v for k, v in headers.items() if k.lower() != 'content-type'}
+                                print(f"DEBUG: Upload headers: {upload_headers}")
+                                
+                                async with httpx.AsyncClient(timeout=30.0) as upload_client:
+                                    upload_response = await upload_client.post(
+                                        f"{self.base_url}/api/v1/rooms.upload/{room_id}",
+                                        files=files,
+                                        data=data,
+                                        headers=upload_headers
+                                    )
+                                    print(f"DEBUG: Rocket.Chat upload response status: {upload_response.status_code}")
+                                    print(f"DEBUG: Rocket.Chat upload response: {upload_response.text}")
+                                    
+                                    if upload_response.status_code == 200:
+                                        upload_result = upload_response.json()
+                                        if upload_result.get('success'):
+                                            uploaded_file_ids.append(upload_result.get('file', {}).get('_id'))
+                                            print(f"DEBUG: Successfully uploaded file {file_name} to Rocket.Chat DM")
+                                        else:
+                                            print(f"DEBUG: Failed to upload file {file_name}: {upload_result.get('error')}")
+                                    else:
+                                        print(f"DEBUG: Upload failed with status {upload_response.status_code}: {upload_response.text}")
+                            else:
+                                print(f"DEBUG: Failed to download file from {att.get('url')}")
+                    except Exception as e:
+                        print(f"DEBUG: Error uploading file {att.get('filename')}: {e}")
+                
+                # If we successfully uploaded files, return success
+                if uploaded_file_ids:
+                    return {"success": True, "message": f"Message with {len(uploaded_file_ids)} file(s) sent successfully"}
+                else:
+                    # Fall back to sending text message without files
+                    print("DEBUG: No files uploaded successfully, sending text message only")
+            
+            # Send text message (either no attachments or fallback)
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(
                     f"{self.base_url}/api/v1/chat.sendMessage",
@@ -953,6 +1023,9 @@ class RocketChatClient:
                     return {"success": False, "error": f"HTTP {response.status_code}: {response.text}"}
                     
         except Exception as e:
+            print(f"Error sending DM: {e}")
+            import traceback
+            traceback.print_exc()
             return {"success": False, "error": str(e)}
 
     async def get_all_conversations(self) -> List[Dict]:
@@ -980,14 +1053,21 @@ class RocketChatClient:
             print(f"Exception getting all conversations: {e}")
             return []
 
-    async def get_all_user_rooms(self) -> Dict:
+    async def get_all_user_rooms(self, user_headers: Dict = None) -> Dict:
         """Get all channels, groups, and DMs that the user is part of"""
         try:
             print("🔍 Fetching real Rocket.Chat rooms data")
             
+            # Use user-specific headers if provided, otherwise use admin headers (for backward compatibility)
+            headers = user_headers if user_headers else self.headers
+            if user_headers:
+                print("✅ Using user-specific headers for rooms")
+            else:
+                print("⚠️ Using admin headers for rooms (fallback)")
+            
             async with httpx.AsyncClient(timeout=10.0) as client:
                 # Get user subscriptions (channels, groups, DMs)
-                response = await client.get(f"{self.base_url}/api/v1/subscriptions.get", headers=self.headers)
+                response = await client.get(f"{self.base_url}/api/v1/subscriptions.get", headers=headers)
                 
                 if response.status_code != 200:
                     print(f"❌ Failed to get subscriptions: HTTP {response.status_code}")

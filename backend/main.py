@@ -813,6 +813,46 @@ async def get_dm_messages(
             # Use username if available, otherwise fall back to display name
             sender_name = username or display_name
             
+            # Parse attachments from Rocket.Chat message
+            attachments = []
+            if msg.get("attachments"):
+                for att in msg["attachments"]:
+                    image_url = att.get("title_link") or att.get("image_url") or att.get("url")
+                    # Convert relative URLs to proxy URLs
+                    if image_url and not image_url.startswith("http"):
+                        image_url = f"/api/rocket-chat/file-proxy{image_url if image_url.startswith('/') else '/' + image_url}"
+                    elif image_url and image_url.startswith("http"):
+                        from urllib.parse import urlparse
+                        parsed = urlparse(image_url)
+                        image_url = f"/api/rocket-chat/file-proxy{parsed.path}"
+                    
+                    attachments.append({
+                        "id": att.get("_id", ""),
+                        "title": att.get("title", ""),
+                        "filename": att.get("title") or att.get("filename", ""),
+                        "url": image_url,
+                        "type": att.get("image_type") or att.get("type", "application/octet-stream"),
+                        "size": att.get("image_size") or att.get("size") or 0,
+                        "preview": f"data:image/jpeg;base64,{att.get('image_preview')}" if att.get('image_preview') else None
+                    })
+            
+            # Also check for file field (single file uploads)
+            if msg.get("file"):
+                file_data = msg["file"]
+                file_url = file_data.get("url", "")
+                if file_url and not file_url.startswith("http"):
+                    file_url = f"/api/rocket-chat/file-proxy{file_url if file_url.startswith('/') else '/' + file_url}"
+                
+                attachments.append({
+                    "id": file_data.get("_id", ""),
+                    "title": file_data.get("name", ""),
+                    "filename": file_data.get("name", ""),
+                    "url": file_url,
+                    "type": file_data.get("type", "application/octet-stream"),
+                    "size": file_data.get("size", 0),
+                    "preview": None
+                })
+            
             formatted_message = {
                 "id": msg.get("_id", f"dm-{i}"),
                 "sender": sender_name,
@@ -821,7 +861,8 @@ async def get_dm_messages(
                 "isOwn": user_data.get("username") == "ankush1",
                 "avatar": None,
                 "type": "message",
-                "reactions": reactions
+                "reactions": reactions,
+                "attachments": attachments if attachments else None
             }
             formatted_messages.append(formatted_message)
         
@@ -833,7 +874,7 @@ async def get_dm_messages(
         raise HTTPException(status_code=500, detail=f"Failed to get DM messages: {str(e)}")
 
 @app.get("/api/rocket-chat/dm-list")
-async def get_dm_list(current_user: User = Depends(get_current_user)):
+async def get_dm_list(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Get all DM conversations"""
     try:
         print(f"DEBUG: Fetching DM list for user: {current_user.email}")
@@ -846,21 +887,22 @@ async def get_dm_list(current_user: User = Depends(get_current_user)):
                 detail="Rocket.Chat server not accessible or authentication failed. Please check your credentials in .env file."
             )
         
-        # Ensure authentication with Social Hub user info
-        authenticated = await rocket_client.ensure_authenticated(
+        # Get user-specific headers for API calls
+        user_headers = await rocket_client.get_user_headers(
             social_hub_user_email=current_user.email,
             social_hub_user_name=current_user.full_name,
-            social_hub_user_id=str(current_user.id)
+            social_hub_user_id=str(current_user.id),
+            db_session=db
         )
         
-        if not authenticated:
+        if not user_headers:
             raise HTTPException(
                 status_code=401, 
-                detail="Failed to authenticate with Rocket.Chat. Please check your credentials."
+                detail="Failed to get user authentication. Please check your credentials."
             )
         
-        # Use the same structured response as channels endpoint
-        rooms = await rocket_client.get_all_user_rooms()
+        # Use user-specific headers to get rooms
+        rooms = await rocket_client.get_all_user_rooms(user_headers=user_headers)
         return {"dms": rooms['direct_messages']}
     except HTTPException:
         raise
@@ -874,15 +916,16 @@ async def send_dm_message(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Send a direct message"""
+    """Send a direct message with optional file attachments"""
     try:
         print(f"DEBUG: Sending DM for user: {current_user.email}")
         
         username = message_data.get("username")
         message = message_data.get("message")
+        attachments = message_data.get("attachments", [])
         
-        if not username or not message:
-            raise HTTPException(status_code=400, detail="Username and message are required")
+        if not username:
+            raise HTTPException(status_code=400, detail="Username is required")
         
         # Get user-specific headers for API calls
         user_headers = await rocket_client.get_user_headers(
@@ -892,7 +935,7 @@ async def send_dm_message(
             db_session=db
         )
         
-        result = await rocket_client.send_direct_message(username, message, user_headers)
+        result = await rocket_client.send_direct_message(username, message, user_headers, attachments)
         
         if result.get("success"):
             return {"success": True, "message": "DM sent successfully"}
@@ -904,20 +947,22 @@ async def send_dm_message(
         raise HTTPException(status_code=500, detail=f"Failed to send DM: {str(e)}")
 
 @app.get("/api/rocket-chat/user-rooms")
-async def get_user_rooms(current_user: User = Depends(get_current_user)):
+async def get_user_rooms(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Get all rooms the user is part of"""
     try:
-        # Ensure authentication with Social Hub user info
-        authenticated = await rocket_client.ensure_authenticated(
+        # Get user-specific headers for API calls
+        user_headers = await rocket_client.get_user_headers(
             social_hub_user_email=current_user.email,
             social_hub_user_name=current_user.full_name,
-            social_hub_user_id=str(current_user.id)
+            social_hub_user_id=str(current_user.id),
+            db_session=db
         )
         
-        if not authenticated:
-            raise HTTPException(status_code=401, detail="Failed to authenticate with Rocket.Chat")
+        if not user_headers:
+            raise HTTPException(status_code=401, detail="Failed to get user authentication")
         
-        rooms = await rocket_client.get_all_user_rooms()
+        # Use user-specific headers to get rooms
+        rooms = await rocket_client.get_all_user_rooms(user_headers=user_headers)
         return rooms
     except Exception as e:
         print(f"Error getting user rooms: {e}")
@@ -1057,6 +1102,71 @@ async def get_channel_messages_by_id(
                     display_emoji = emoji_display_map.get(emoji, emoji)
                     reactions[display_emoji] = reaction_data.get("usernames", [])
             
+            # Parse attachments from Rocket.Chat message
+            attachments = []
+            if msg.get("attachments"):
+                print(f"DEBUG: Message has {len(msg['attachments'])} attachment(s)")
+                for idx, att in enumerate(msg["attachments"]):
+                    print(f"DEBUG: Attachment {idx}: {att}")
+                    
+                    # Extract image URL from various possible fields
+                    image_url = att.get("title_link") or att.get("image_url") or att.get("image_preview") or att.get("url") or att.get("link")
+                    
+                    print(f"DEBUG: Extracted image_url: {image_url}")
+                    
+                    # Convert relative URLs to proxy URLs for authenticated access
+                    rocket_url = os.getenv('ROCKET_CHAT_URL', 'http://10.68.0.49:30082')
+                    if image_url and not image_url.startswith("http"):
+                        # Convert to proxy URL for authenticated access
+                        proxy_path = image_url if image_url.startswith('/') else f'/{image_url}'
+                        image_url = f"/api/rocket-chat/file-proxy{proxy_path}"
+                        print(f"DEBUG: Converted to proxy URL: {image_url}")
+                    elif image_url and image_url.startswith("http"):
+                        # Extract the path from full URL for proxy
+                        from urllib.parse import urlparse
+                        parsed = urlparse(image_url)
+                        proxy_path = parsed.path
+                        image_url = f"/api/rocket-chat/file-proxy{proxy_path}"
+                        print(f"DEBUG: Converted full URL to proxy URL: {image_url}")
+                    print(f"DEBUG: Final image_url: {image_url}")
+                    
+                    # Get file type and size - use image_type if available
+                    attachment_type = att.get("image_type") or att.get("type", "application/octet-stream")
+                    attachment_size = att.get("image_size") or att.get("size") or att.get("size_bytes") or att.get("sizeLength") or 0
+                    
+                    # Check if we have a base64 preview
+                    image_preview = att.get("image_preview")
+                    
+                    attachment_data = {
+                        "id": att.get("_id", ""),
+                        "title": att.get("title", ""),
+                        "filename": att.get("title") or att.get("filename", ""),
+                        "url": image_url,
+                        "type": attachment_type,  # Use image_type to correctly identify images
+                        "size": attachment_size,
+                        "preview": f"data:image/jpeg;base64,{image_preview}" if image_preview else None
+                    }
+                    
+                    print(f"DEBUG: Attachment data: {attachment_data}")
+                    attachments.append(attachment_data)
+            
+            # Also check for file field (single file uploads)
+            if msg.get("file"):
+                file_data = msg["file"]
+                file_url = file_data.get("url", "")
+                if file_url and not file_url.startswith("http"):
+                    file_url = f"/api/rocket-chat/file-proxy{file_url if file_url.startswith('/') else '/' + file_url}"
+                
+                attachments.append({
+                    "id": file_data.get("_id", ""),
+                    "title": file_data.get("name", ""),
+                    "filename": file_data.get("name", ""),
+                    "url": file_url,
+                    "type": file_data.get("type", "application/octet-stream"),
+                    "size": file_data.get("size", 0),
+                    "preview": None
+                })
+            
             formatted_message = {
                 "id": msg.get("_id", f"msg-{i}"),
                 "text": msg.get("msg", ""),
@@ -1071,7 +1181,8 @@ async def get_channel_messages_by_id(
                 "thread_count": thread_count,
                 "thread_ts": msg.get("tmid"),
                 "thread_messages": thread_messages,  # Include thread messages
-                "type": "system" if is_system else "message"
+                "type": "system" if is_system else "message",
+                "attachments": attachments if attachments else None
             }
             formatted_messages.append(formatted_message)
         
