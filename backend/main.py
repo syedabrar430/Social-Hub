@@ -353,6 +353,42 @@ async def upload_profile_picture(
 async def logout():
     return {"message": "Successfully logged out"}
 
+# Search users endpoint
+@app.get("/api/users/search")
+async def search_users(
+    query: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Search users in the Social Hub database"""
+    try:
+        # Search users by name, email, or rocket_chat_username (case-insensitive)
+        users = db.query(User).filter(
+            (User.full_name.ilike(f"%{query}%")) |
+            (User.email.ilike(f"%{query}%")) |
+            (User.rocket_chat_username.ilike(f"%{query}%"))
+        ).filter(User.id != current_user.id).limit(20).all()
+        
+        # Format response
+        search_results = []
+        for user in users:
+            search_results.append({
+                "id": str(user.id),
+                "username": user.rocket_chat_username or user.email.split('@')[0],  # Use rocket_chat_username or email prefix
+                "full_name": user.full_name,
+                "email": user.email,
+                "profile_picture": user.profile_picture_url,
+                "rocket_chat_username": user.rocket_chat_username
+            })
+        
+        return {
+            "users": search_results,
+            "count": len(search_results)
+        }
+    except Exception as e:
+        print(f"Error searching users: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to search users: {str(e)}")
+
 # ==================== ROCKET.CHAT ENDPOINTS ====================
 
 @app.post("/chat/setup")

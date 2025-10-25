@@ -66,14 +66,12 @@ class ApiService {
       ...options,
     };
 
-    // Add session token if available
-    const sessionId = localStorage.getItem('session_id');
-    const userId = localStorage.getItem('user_id');
-    if (sessionId && userId) {
+    // Add Bearer token if available
+    const token = localStorage.getItem('access_token');
+    if (token) {
       config.headers = {
         ...config.headers,
-        'X-Session-Token': sessionId,
-        'X-User-ID': userId,
+        Authorization: `Bearer ${token}`,
       };
     }
 
@@ -228,6 +226,23 @@ class ApiService {
     localStorage.removeItem('user_id'); 
     localStorage.removeItem('user');
   }
+
+  // User search functionality
+  async searchUsers(query: string): Promise<{ users: UserSearchResult[]; count: number }> {
+    console.log('🔍 API Service: Searching users with query:', query);
+    console.log('🔍 API Service: Access token available:', !!localStorage.getItem('access_token'));
+    console.log('🔍 API Service: Token value:', localStorage.getItem('access_token')?.substring(0, 20) + '...');
+    return this.request<{ users: UserSearchResult[]; count: number }>(`/api/users/search?query=${encodeURIComponent(query)}`);
+  }
+}
+
+export interface UserSearchResult {
+  id: string;
+  username: string;
+  full_name: string;
+  email: string;
+  profile_picture?: string;
+  rocket_chat_username?: string;
 }
 
 export const apiService = new ApiService();

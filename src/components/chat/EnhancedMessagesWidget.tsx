@@ -9,7 +9,9 @@ import { useAuth } from '@/contexts/AuthContext';
 import { type ChatConversation, type ChatMessage } from '@/services/chat';
 import { chatService as rocketChatService } from '@/services/chat';
 import { useToast } from '@/hooks/use-toast';
-import { Hash, Lock, MessageCircle, Users, User, Search, Send, Smile, Reply, Paperclip, Image, File, Mic, Video, MoreHorizontal } from 'lucide-react';
+import { Hash, Lock, MessageCircle, Users, User, Search, Send, Smile, Reply, Paperclip, Image, File, Mic, Video, MoreHorizontal, UserPlus } from 'lucide-react';
+import { UserSearch } from './UserSearch';
+import { UserSearchResult } from '@/services/api';
 
 // Helper function to format message timestamp
 const formatMessageTime = (timestamp: string) => {
@@ -84,6 +86,9 @@ const EnhancedMessagesWidget = () => {
   const [searchResults, setSearchResults] = useState<ChatMessage[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [showSearchResults, setShowSearchResults] = useState(false);
+  
+  // User search
+  const [showUserSearch, setShowUserSearch] = useState(false);
   
   const { isAuthenticated, user, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
@@ -405,7 +410,14 @@ const EnhancedMessagesWidget = () => {
       if (selectedConversation.type === 'direct_message' && selectedConversation.other_user) {
         // Use the conversation name (Rocket.Chat username) for sending DMs
         const username = selectedConversation.name || selectedConversation.other_user;
-        console.log('Sending DM to username:', username, 'display_name:', selectedConversation.other_user, 'with attachments:', uploadedFiles);
+        console.log('🔍 DM Message Debug:', {
+          conversationType: selectedConversation.type,
+          conversationName: selectedConversation.name,
+          otherUser: selectedConversation.other_user,
+          username: username,
+          messageContent: messageContent,
+          attachments: uploadedFiles
+        });
         await rocketChatService.sendDirectMessage(username, messageContent, uploadedFiles);
       } else {
         console.log('DEBUG: Calling sendRocketChatChannelMessage with:', {
@@ -597,6 +609,53 @@ const EnhancedMessagesWidget = () => {
     }
   };
 
+  // Handle user search selection
+  const handleUserSelect = async (selectedUser: UserSearchResult) => {
+    console.log('Selected user for DM:', selectedUser);
+    
+    try {
+      // Create a new DM conversation with the selected user
+      const newDMConversation: ChatConversation = {
+        id: `dm-${selectedUser.id}`,
+        name: selectedUser.rocket_chat_username || selectedUser.username,
+        display_name: selectedUser.full_name,
+        type: 'direct_message',  // Use 'direct_message' to match the message sending logic
+        other_user: selectedUser.username,
+        unread_count: 0,
+        last_message: null,
+        last_message_time: null
+      };
+      
+      // Add to DMs list if not already present
+      setDirectMessages(prev => {
+        const exists = prev.some(dm => dm.other_user === selectedUser.username);
+        if (!exists) {
+          console.log('Adding new DM conversation:', newDMConversation);
+          return [newDMConversation, ...prev];
+        }
+        console.log('DM conversation already exists for user:', selectedUser.username);
+        return prev;
+      });
+      
+      // Select the conversation
+      console.log('Selecting conversation:', newDMConversation);
+      await handleConversationSelect(newDMConversation);
+      
+      toast({
+        title: "Direct Message Started",
+        description: `Started a conversation with ${selectedUser.full_name}`,
+      });
+      
+    } catch (error) {
+      console.error('Error starting DM:', error);
+      toast({
+        title: "Error",
+        description: "Failed to start direct message. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
   // Get conversations based on active tab
   const getConversations = () => {
     console.log('🔍 getConversations called:', {
@@ -729,39 +788,50 @@ const EnhancedMessagesWidget = () => {
                 </div>
 
                 {/* Search */}
-                <div className="relative">
-                  <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Search messages..."
-                    value={searchQuery}
-                    onChange={async (e) => {
-                      const query = e.target.value;
-                      setSearchQuery(query);
-                      
-                      if (query.trim().length >= 2) {
-                        setIsSearching(true);
-                        setShowSearchResults(true);
-                        try {
-                          const results = await rocketChatService.searchMessages(query, 50);
-                          setSearchResults(results.messages || []);
-                        } catch (error) {
-                          console.error('Search failed:', error);
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Search messages..."
+                      value={searchQuery}
+                      onChange={async (e) => {
+                        const query = e.target.value;
+                        setSearchQuery(query);
+                        
+                        if (query.trim().length >= 2) {
+                          setIsSearching(true);
+                          setShowSearchResults(true);
+                          try {
+                            const results = await rocketChatService.searchMessages(query, 50);
+                            setSearchResults(results.messages || []);
+                          } catch (error) {
+                            console.error('Search failed:', error);
+                            setSearchResults([]);
+                          } finally {
+                            setIsSearching(false);
+                          }
+                        } else if (query.trim().length === 0) {
+                          setShowSearchResults(false);
                           setSearchResults([]);
-                        } finally {
-                          setIsSearching(false);
                         }
-                      } else if (query.trim().length === 0) {
-                        setShowSearchResults(false);
-                        setSearchResults([]);
-                      }
-                    }}
-                    onKeyPress={(e) => {
-                      if (e.key === 'Enter' && searchQuery.trim().length >= 2) {
-                        // Trigger search
-                      }
-                    }}
-                    className="pl-10"
-                  />
+                      }}
+                      onKeyPress={(e) => {
+                        if (e.key === 'Enter' && searchQuery.trim().length >= 2) {
+                          // Trigger search
+                        }
+                      }}
+                      className="pl-10"
+                    />
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowUserSearch(true)}
+                    className="flex items-center gap-2"
+                  >
+                    <UserPlus className="h-4 w-4" />
+                    New DM
+                  </Button>
                 </div>
               </div>
 
@@ -1464,6 +1534,14 @@ const EnhancedMessagesWidget = () => {
           </div>
         </div>
       </div>
+      
+      {/* User Search Modal */}
+      {showUserSearch && (
+        <UserSearch
+          onUserSelect={handleUserSelect}
+          onClose={() => setShowUserSearch(false)}
+        />
+      )}
     </ResponsiveLayout>
   );
 };
