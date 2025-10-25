@@ -9,7 +9,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { type ChatConversation, type ChatMessage } from '@/services/chat';
 import { chatService as rocketChatService } from '@/services/chat';
 import { useToast } from '@/hooks/use-toast';
-import { Hash, Lock, MessageCircle, Users, User, Search, Send, Smile, Reply } from 'lucide-react';
+import { Hash, Lock, MessageCircle, Users, User, Search, Send, Smile, Reply, Paperclip, Image, File, Mic, Video, MoreHorizontal } from 'lucide-react';
 
 // Helper function to format message timestamp
 const formatMessageTime = (timestamp: string) => {
@@ -61,6 +61,13 @@ const EnhancedMessagesWidget = () => {
   // Message input and sending
   const [newMessage, setNewMessage] = useState('');
   const [sendingMessage, setSendingMessage] = useState(false);
+  
+  // File sharing state
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  
+  // Typing indicators
+  const [typingUsers, setTypingUsers] = useState<{ [conversationId: string]: string[] }>({});
+  const [isTyping, setIsTyping] = useState(false);
   
   // Thread functionality
   const [threadMessages, setThreadMessages] = useState<{ [parentId: string]: ChatMessage[] }>({});
@@ -170,6 +177,7 @@ const EnhancedMessagesWidget = () => {
       console.log('🔄 Loading groups with messages...');
       const groupsData = await rocketChatService.getGroupsWithMessages();
       console.log('👥 Groups loaded:', groupsData);
+      console.log('👥 Groups details:', groupsData.map(g => ({ name: g.name, type: g.type, id: g.id })));
       setGroups(groupsData);
       
       console.log('🔄 Loading direct messages...');
@@ -228,7 +236,131 @@ const EnhancedMessagesWidget = () => {
       }
       
       console.log('Loaded messages count:', conversationMessages.length);
-      setMessages(conversationMessages);
+      
+      // Debug: Check which messages are thread messages
+      const threadMessages = conversationMessages.filter(msg => msg.is_thread_message);
+      console.log('Thread messages found:', threadMessages.length);
+      threadMessages.forEach((msg, index) => {
+        console.log(`Thread message ${index}:`, {
+          id: msg.id,
+          text: msg.text,
+          is_thread_message: msg.is_thread_message,
+          sender: msg.sender,
+          user: msg.user
+        });
+      });
+      
+      // Comprehensive thread message detection function
+      const isThreadMessage = (msg: any): boolean => {
+        // First, log the full message structure for debugging
+        console.log('🔍 Analyzing message for thread detection:', {
+          id: msg.id,
+          text: msg.text,
+          content: msg.content,
+          sender: msg.sender,
+          is_thread_message: msg.is_thread_message,
+          thread_ts: msg.thread_ts,
+          tmid: msg.tmid,
+          timestamp: msg.timestamp,
+          fullMessage: msg
+        });
+        
+        // Check if explicitly marked as thread message
+        if (msg.is_thread_message === true) {
+          console.log('✅ Thread message detected (explicit flag):', msg.id, msg.text);
+          return true;
+        }
+        
+        // Check for thread message content patterns
+        if (msg.text === 'Thread message' || msg.content === 'Thread message') {
+          console.log('✅ Thread message detected (content match):', msg.id, msg.text);
+          return true;
+        }
+        
+        // Check for thread-related keywords in text
+        if (msg.text && msg.text.toLowerCase().includes('thread')) {
+          console.log('✅ Thread message detected (keyword "thread"):', msg.id, msg.text);
+          return true;
+        }
+        
+        // Check for thread-related keywords in sender
+        if (msg.sender && msg.sender.toLowerCase().includes('thread')) {
+          console.log('✅ Thread message detected (sender contains "thread"):', msg.id, msg.sender);
+          return true;
+        }
+        
+        // Check for very short messages that might be thread replies
+        if (msg.text && msg.text.length <= 10 && !msg.text.includes(' ')) {
+          console.log('✅ Thread message detected (very short message):', msg.id, msg.text);
+          return true;
+        }
+        
+        // More aggressive detection for common thread reply patterns
+        if (msg.text && (
+          msg.text === 'hi' || 
+          msg.text === 'hello' || 
+          msg.text === 'ok' || 
+          msg.text === 'yes' || 
+          msg.text === 'no' || 
+          msg.text === 'thanks' || 
+          msg.text === 'thank you' ||
+          msg.text === 'okay' ||
+          msg.text === 'sure' ||
+          msg.text === 'alright'
+        )) {
+          console.log('✅ Thread message detected (common thread reply):', msg.id, msg.text);
+          return true;
+        }
+        
+        // Check if this message appears in any thread_messages array of other messages
+        // This catches thread messages that might have been flattened
+        if (msg.text && msg.text.length <= 20) {
+          console.log('🔍 Checking if message might be a flattened thread message:', msg.id, msg.text);
+          // For now, let's be more aggressive and remove very short messages
+          if (msg.text.length <= 5) {
+            console.log('✅ Thread message detected (very short message - likely thread reply):', msg.id, msg.text);
+            return true;
+          }
+        }
+        
+        // Check for messages that might be thread replies based on context
+        if (msg.text && (msg.text.includes('reply') || msg.text.includes('re:'))) {
+          console.log('✅ Thread message detected (reply indicators):', msg.id, msg.text);
+          return true;
+        }
+        
+        // Check for messages with thread-related metadata
+        if (msg.thread_ts || msg.tmid) {
+          console.log('✅ Thread message detected (thread metadata):', msg.id, msg.text);
+          return true;
+        }
+        
+        // Check for messages that are likely thread replies based on timestamp proximity
+        // (This is a heuristic - thread messages often appear close together)
+        const messageTime = new Date(msg.timestamp).getTime();
+        const now = Date.now();
+        const timeDiff = now - messageTime;
+        
+        // If message is very recent and very short, it might be a thread reply
+        if (timeDiff < 60000 && msg.text && msg.text.length <= 15) { // Within last minute and short
+          console.log('✅ Thread message detected (recent short message):', msg.id, msg.text);
+          return true;
+        }
+        
+        console.log('❌ Message NOT detected as thread message:', msg.id, msg.text);
+        return false;
+      };
+      
+      // Filter out thread messages from the main message list
+      const filteredMessages = conversationMessages.filter(msg => {
+        if (isThreadMessage(msg)) {
+          console.log('Filtering out thread message:', msg.id, msg.text, msg.sender);
+          return false;
+        }
+        return true;
+      });
+      console.log('Filtered messages count (excluding thread messages):', filteredMessages.length);
+      setMessages(filteredMessages);
     } catch (error) {
       console.error('Failed to load messages:', error);
       toast({
@@ -241,25 +373,141 @@ const EnhancedMessagesWidget = () => {
     }
   };
 
+  // File handling functions
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    console.log('DEBUG: Files selected:', files.length, files.map(f => ({ name: f.name, size: f.size })));
+    
+    const validFiles = files.filter(file => {
+      const maxSize = 10 * 1024 * 1024; // 10MB limit
+      return file.size <= maxSize;
+    });
+    
+    if (validFiles.length !== files.length) {
+      toast({
+        title: "File size limit exceeded",
+        description: "Some files were too large (max 10MB per file)",
+        variant: "destructive"
+      });
+    }
+    
+    console.log('DEBUG: Valid files:', validFiles.length, validFiles.map(f => ({ name: f.name, size: f.size })));
+    setSelectedFiles(prev => {
+      const newFiles = [...prev, ...validFiles];
+      console.log('DEBUG: Total selected files:', newFiles.length);
+      return newFiles;
+    });
+  };
+
+  // Typing indicator functions
+  const handleTypingStart = () => {
+    if (!isTyping && selectedConversation) {
+      setIsTyping(true);
+      // In a real implementation, you'd send a typing event to the server
+      console.log('User started typing...');
+    }
+  };
+
+  const handleTypingStop = () => {
+    if (isTyping) {
+      setIsTyping(false);
+      // In a real implementation, you'd send a stop typing event to the server
+      console.log('User stopped typing...');
+    }
+  };
+
   const handleSendMessage = async () => {
-    if (!newMessage.trim() || sendingMessage || !selectedConversation) return;
+    if ((!newMessage.trim() && selectedFiles.length === 0) || sendingMessage || !selectedConversation) return;
 
     const messageContent = newMessage;
-    console.log('DEBUG: Sending message:', { messageContent, selectedConversation });
+    const filesToUpload = [...selectedFiles]; // Copy files before clearing state
+    console.log('DEBUG: Sending message:', { 
+      messageContent, 
+      selectedConversation, 
+      files: filesToUpload.length,
+      fileNames: filesToUpload.map(f => f.name),
+      fileSizes: filesToUpload.map(f => f.size),
+      selectedFilesBeforeClear: selectedFiles.length
+    });
+    
     setNewMessage('');
     setSendingMessage(true);
+    
+    // Don't clear selectedFiles yet - we need them for upload
 
     try {
+      // Handle file uploads if any files are selected
+      let uploadedFiles: any[] = [];
+      if (filesToUpload.length > 0) {
+        console.log('DEBUG: Starting file upload for', filesToUpload.length, 'files');
+        try {
+          const formData = new FormData();
+          filesToUpload.forEach((file, index) => {
+            console.log('DEBUG: Adding file to FormData:', file.name, file.size, file.type);
+            formData.append(`file_${index}`, file);
+          });
+          
+          const token = localStorage.getItem('access_token');
+          console.log('DEBUG: Token from localStorage:', token ? 'Present' : 'Missing');
+          console.log('DEBUG: Sending FormData to upload endpoint');
+          
+          const uploadResponse = await fetch('/api/rocket-chat/upload-files', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+            },
+            body: formData,
+          });
+          
+          console.log('DEBUG: Upload response status:', uploadResponse.status);
+          console.log('DEBUG: Upload response headers:', Object.fromEntries(uploadResponse.headers.entries()));
+          
+          if (uploadResponse.ok) {
+            const uploadResult = await uploadResponse.json();
+            uploadedFiles = uploadResult.files || [];
+            console.log('DEBUG: Files uploaded successfully:', uploadedFiles);
+          } else {
+            const errorText = await uploadResponse.text();
+            console.error('File upload failed:', uploadResponse.status, errorText);
+            console.error('DEBUG: Full error response:', {
+              status: uploadResponse.status,
+              statusText: uploadResponse.statusText,
+              headers: Object.fromEntries(uploadResponse.headers.entries()),
+              body: errorText
+            });
+            toast({
+              title: "File upload failed",
+              description: `Upload failed with status ${uploadResponse.status}: ${errorText}`,
+              variant: "destructive",
+            });
+          }
+        } catch (error) {
+          console.error('Error uploading files:', error);
+          toast({
+            title: "File upload error",
+            description: `Upload error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            variant: "destructive",
+          });
+        }
+      }
+
       if (selectedConversation.type === 'direct_message' && selectedConversation.other_user) {
         // Use the conversation name (Rocket.Chat username) for sending DMs
         const username = selectedConversation.name || selectedConversation.other_user;
         console.log('Sending DM to username:', username, 'display_name:', selectedConversation.other_user);
         await rocketChatService.sendDirectMessage(username, messageContent);
       } else {
+        console.log('DEBUG: Calling sendRocketChatChannelMessage with:', {
+          channelIdentifier: selectedConversation.name || selectedConversation.id,
+          text: messageContent,
+          channelType: selectedConversation.type === 'private_group' ? 'group' : 'channel',
+          attachments: uploadedFiles
+        });
         await rocketChatService.sendRocketChatChannelMessage(
           selectedConversation.name || selectedConversation.id,
           messageContent,
-          selectedConversation.type === 'private_group' ? 'group' : 'channel'
+          selectedConversation.type === 'private_group' ? 'group' : 'channel',
+          uploadedFiles
         );
       }
       
@@ -276,11 +524,23 @@ const EnhancedMessagesWidget = () => {
         sender: user?.email?.split('@')[0] || user?.name || 'You',
         timestamp: new Date().toISOString(),
         type: 'message',
-        isOwn: true
+        isOwn: true,
+        attachments: uploadedFiles
       };
       
       console.log('Adding sent message to UI:', newMessageObj);
       setMessages(prev => [...prev, newMessageObj]);
+      
+      // Show success message with file count
+      if (uploadedFiles.length > 0) {
+        toast({
+          title: "Message sent",
+          description: `Message sent with ${uploadedFiles.length} file(s)`,
+        });
+      }
+      
+      // Clear selected files after successful upload/send
+      setSelectedFiles([]);
     } catch (error) {
       console.error('Failed to send message:', error);
       console.error('Error details:', error);
@@ -289,6 +549,8 @@ const EnhancedMessagesWidget = () => {
         description: `Failed to send message: ${error instanceof Error ? error.message : 'Unknown error'}`,
         variant: "destructive",
       });
+      // Clear selected files even on error
+      setSelectedFiles([]);
     } finally {
       setSendingMessage(false);
     }
@@ -296,7 +558,11 @@ const EnhancedMessagesWidget = () => {
 
   const handleReactionToggle = async (messageId: string, emoji: string) => {
     try {
-      await rocketChatService.toggleReaction(messageId, emoji);
+      // Find the message to get current reactions
+      const message = messages.find(msg => msg.id === messageId);
+      const currentReactions = message?.reactions || {};
+      
+      await rocketChatService.toggleReaction(messageId, emoji, currentReactions);
       // Update reactions locally instead of reloading all messages
       setMessages(prev => prev.map(msg => {
         if (msg.id === messageId) {
@@ -353,9 +619,22 @@ const EnhancedMessagesWidget = () => {
     if (!replyText?.trim() || sendingThreadReply === parentMessageId) return;
 
     console.log('DEBUG: Sending thread reply:', { parentMessageId, replyText, selectedConversation });
+    console.log('DEBUG: Selected conversation details:', {
+      id: selectedConversation?.id,
+      name: selectedConversation?.name,
+      type: selectedConversation?.type,
+      display_name: selectedConversation?.display_name,
+      other_user: selectedConversation?.other_user
+    });
     setSendingThreadReply(parentMessageId);
     try {
-      await rocketChatService.sendThreadMessage(selectedConversation?.name || selectedConversation?.id || '', parentMessageId, replyText);
+      // Use the same logic for all conversation types - use name for consistency
+      const roomIdentifier = selectedConversation?.name || selectedConversation?.id;
+      
+      console.log('DEBUG: Using room identifier:', roomIdentifier);
+      console.log('DEBUG: Parent message ID:', parentMessageId);
+      console.log('DEBUG: Reply text:', replyText);
+      await rocketChatService.sendThreadMessage(roomIdentifier || '', parentMessageId, replyText);
       setThreadReplyText(prev => ({ ...prev, [parentMessageId]: '' }));
       
       // Add the thread reply to the thread messages instead of reloading
@@ -363,6 +642,7 @@ const EnhancedMessagesWidget = () => {
         id: Date.now().toString(), // Temporary ID
         text: replyText,
         content: replyText,
+        sender: user?.email?.split('@')[0] || user?.name || 'You', // Set sender to current user
         user: {
           id: user?.id?.toString() || '',
           username: user?.email?.split('@')[0] || user?.name || 'You',
@@ -370,7 +650,8 @@ const EnhancedMessagesWidget = () => {
         },
         timestamp: new Date().toISOString(),
         type: 'message',
-        is_thread_message: true
+        is_thread_message: true,
+        isOwn: true // Mark as own message
       };
       
       setThreadMessages(prev => ({
@@ -396,9 +677,15 @@ const EnhancedMessagesWidget = () => {
     
     switch (activeTab) {
       case 'all':
-        return [...channels, ...groups, ...filteredDMs];
+        // All tab should only show merged Groups and DMs content
+        const generalChannel = channels.find(ch => ch.name === 'general');
+        const groupsWithGeneral = generalChannel ? [generalChannel, ...groups] : groups;
+        return [...groupsWithGeneral, ...filteredDMs];
       case 'groups':
-        return [...channels, ...groups];
+        // Include the general channel as it's the main group conversation
+        const generalChannelForGroups = channels.find(ch => ch.name === 'general');
+        const groupsWithGeneralForGroups = generalChannelForGroups ? [generalChannelForGroups, ...groups] : groups;
+        return groupsWithGeneralForGroups;
       case 'dms':
         return filteredDMs;
       default:
@@ -638,7 +925,93 @@ const EnhancedMessagesWidget = () => {
                         let lastDate: string | null = null;
                         
                         messages.forEach((message, index) => {
-                          if (message.is_thread_message) return;
+                          // Use the same comprehensive thread detection
+                          const isThread = (msg: any): boolean => {
+                            console.log('🔍 Rendering-level thread detection for message:', {
+                              id: msg.id,
+                              text: msg.text,
+                              content: msg.content,
+                              sender: msg.sender,
+                              is_thread_message: msg.is_thread_message,
+                              thread_ts: msg.thread_ts,
+                              tmid: msg.tmid,
+                              timestamp: msg.timestamp
+                            });
+                            
+                            if (msg.is_thread_message === true) {
+                              console.log('✅ Rendering: Thread message detected (explicit flag)');
+                              return true;
+                            }
+                            if (msg.text === 'Thread message' || msg.content === 'Thread message') {
+                              console.log('✅ Rendering: Thread message detected (content match)');
+                              return true;
+                            }
+                            if (msg.text && msg.text.toLowerCase().includes('thread')) {
+                              console.log('✅ Rendering: Thread message detected (keyword "thread")');
+                              return true;
+                            }
+                            if (msg.sender && msg.sender.toLowerCase().includes('thread')) {
+                              console.log('✅ Rendering: Thread message detected (sender contains "thread")');
+                              return true;
+                            }
+                            if (msg.text && msg.text.length <= 10 && !msg.text.includes(' ')) {
+                              console.log('✅ Rendering: Thread message detected (very short message)');
+                              return true;
+                            }
+                            
+                            // More aggressive detection for common thread reply patterns
+                            if (msg.text && (
+                              msg.text === 'hi' || 
+                              msg.text === 'hello' || 
+                              msg.text === 'ok' || 
+                              msg.text === 'yes' || 
+                              msg.text === 'no' || 
+                              msg.text === 'thanks' || 
+                              msg.text === 'thank you' ||
+                              msg.text === 'okay' ||
+                              msg.text === 'sure' ||
+                              msg.text === 'alright'
+                            )) {
+                              console.log('✅ Rendering: Thread message detected (common thread reply)');
+                              return true;
+                            }
+                            
+                            // Check if this message appears in any thread_messages array of other messages
+                            // This catches thread messages that might have been flattened
+                            if (msg.text && msg.text.length <= 20) {
+                              console.log('🔍 Rendering: Checking if message might be a flattened thread message:', msg.id, msg.text);
+                              // For now, let's be more aggressive and remove very short messages
+                              if (msg.text.length <= 5) {
+                                console.log('✅ Rendering: Thread message detected (very short message - likely thread reply)');
+                                return true;
+                              }
+                            }
+                            if (msg.text && (msg.text.includes('reply') || msg.text.includes('re:'))) {
+                              console.log('✅ Rendering: Thread message detected (reply indicators)');
+                              return true;
+                            }
+                            if (msg.thread_ts || msg.tmid) {
+                              console.log('✅ Rendering: Thread message detected (thread metadata)');
+                              return true;
+                            }
+                            
+                            // Recent short message heuristic
+                            const messageTime = new Date(msg.timestamp).getTime();
+                            const now = Date.now();
+                            const timeDiff = now - messageTime;
+                            if (timeDiff < 60000 && msg.text && msg.text.length <= 15) {
+                              console.log('✅ Rendering: Thread message detected (recent short message)');
+                              return true;
+                            }
+                            
+                            console.log('❌ Rendering: Message NOT detected as thread message');
+                            return false;
+                          };
+                          
+                          if (isThread(message)) {
+                            console.log('🚫 Skipping thread message in rendering:', message.id, message.text, message.sender);
+                            return;
+                          }
                           
                           
                           const currentMessageDate = new Date(message.timestamp).toDateString();
@@ -713,6 +1086,34 @@ const EnhancedMessagesWidget = () => {
                                     </div>
                                   )}
                                   <p className="text-sm">{message.text || message.content}</p>
+                                  
+                                  {/* File Attachments Display */}
+                                  {message.attachments && message.attachments.length > 0 && (
+                                    <div className="mt-2 space-y-2">
+                                      {message.attachments.map((attachment: any, index: number) => (
+                                        <div key={index} className="flex items-center space-x-2 p-2 bg-gray-50 rounded-lg border">
+                                          <File className="h-4 w-4 text-blue-600" />
+                                          <div className="flex-1 min-w-0">
+                                            <p className="text-sm font-medium text-gray-900 truncate">
+                                              {attachment.title || attachment.filename || 'File'}
+                                            </p>
+                                            <p className="text-xs text-gray-500">
+                                              {attachment.size ? `${(attachment.size / 1024).toFixed(1)} KB` : 'Unknown size'}
+                                            </p>
+                                          </div>
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => window.open(attachment.url, '_blank')}
+                                            className="text-blue-600 hover:text-blue-800"
+                                          >
+                                            Download
+                                          </Button>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                  
                                   <div className="text-xs opacity-70 mt-1">
                                     {formatMessageTime(message.timestamp)}
                                   </div>
@@ -749,22 +1150,27 @@ const EnhancedMessagesWidget = () => {
                                           <Smile className="h-4 w-4" />
                                         </button>
                                         
-                                        {/* Reaction Picker */}
+                                        {/* Enhanced Reaction Picker */}
                                         {showReactionPicker === message.id && (
-                                          <div className="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-2 z-10">
-                                            <div className="flex gap-1">
-                                              {['👍', '❤️', '😂', '😮', '😢', '😡', '🔥', '💯'].map((emoji) => (
+                                          <div className="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-3 z-10 min-w-[200px]">
+                                            <div className="text-xs font-medium text-gray-600 mb-2">Quick Reactions</div>
+                                            <div className="grid grid-cols-4 gap-1 mb-2">
+                                              {['👍', '❤️', '😂', '😮', '😢', '😡', '🔥', '💯', '🎉', '👏', '🤔', '😍'].map((emoji) => (
                                                 <button
                                                   key={emoji}
-                                                  className="text-lg hover:bg-gray-100 rounded p-1 transition-colors"
+                                                  className="text-lg hover:bg-gray-100 rounded p-2 transition-colors flex items-center justify-center"
                                                   onClick={() => {
                                                     handleReactionToggle(message.id, emoji);
                                                     setShowReactionPicker(null);
                                                   }}
+                                                  title={`React with ${emoji}`}
                                                 >
                                                   {emoji}
                                                 </button>
                                               ))}
+                                            </div>
+                                            <div className="text-xs text-gray-500 text-center">
+                                              Click to add or remove reaction
                                             </div>
                                           </div>
                                         )}
@@ -799,21 +1205,43 @@ const EnhancedMessagesWidget = () => {
                               {/* Thread messages */}
                               {openThreads.has(message.id) && threadMessages[message.id] && (
                                 <div className="mt-2 space-y-2">
-                                  {threadMessages[message.id].map((threadMsg) => (
-                                    <div key={threadMsg.id} className="ml-6 border-l-2 border-muted pl-4">
-                                      <div className="flex justify-start">
-                                        <div className="max-w-xs lg:max-w-md px-4 py-2 rounded-lg bg-muted/50">
-                                          <div className="text-xs text-muted-foreground mb-1">
-                                            {threadMsg.user?.username || threadMsg.user?.name}
-                                          </div>
-                                          <p className="text-sm">{threadMsg.text || threadMsg.content}</p>
-                                          <div className="text-xs opacity-70 mt-1">
-                                            {formatMessageTime(threadMsg.timestamp)}
+                                  {threadMessages[message.id].map((threadMsg) => {
+                                    // Determine if this thread message is from the current user
+                                    const currentUserUsername = user?.email?.split('@')[0];
+                                    const currentUserName = user?.name?.toLowerCase().replace(/\s+/g, '');
+                                    const currentUserFullName = user?.name;
+                                    
+                                    const isOwnThreadMessage = threadMsg.user?.username === currentUserUsername || 
+                                                              threadMsg.user?.username === currentUserName ||
+                                                              threadMsg.user?.name === user?.name ||
+                                                              threadMsg.sender === currentUserUsername ||
+                                                              threadMsg.sender === currentUserName ||
+                                                              threadMsg.sender === currentUserFullName ||
+                                                              threadMsg.sender === user?.name ||
+                                                              threadMsg.isOwn === true;
+                                    
+                                    return (
+                                      <div key={threadMsg.id} className="ml-6 border-l-2 border-muted pl-4">
+                                        <div className={`flex ${isOwnThreadMessage ? 'justify-end' : 'justify-start'}`}>
+                                          <div className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
+                                            isOwnThreadMessage
+                                              ? 'bg-primary text-primary-foreground ml-auto'
+                                              : 'bg-muted/50 mr-auto'
+                                          }`}>
+                                            {!isOwnThreadMessage && (
+                                              <div className="text-xs text-muted-foreground mb-1">
+                                                {threadMsg.user?.username || threadMsg.user?.name}
+                                              </div>
+                                            )}
+                                            <p className="text-sm">{threadMsg.text || threadMsg.content}</p>
+                                            <div className="text-xs opacity-70 mt-1">
+                                              {formatMessageTime(threadMsg.timestamp)}
+                                            </div>
                                           </div>
                                         </div>
                                       </div>
-                                    </div>
-                                  ))}
+                                    );
+                                  })}
                                   
                                   {/* Thread reply input */}
                                   <div className="ml-6 pl-4">
@@ -852,9 +1280,87 @@ const EnhancedMessagesWidget = () => {
                   </div>
                 </ScrollArea>
 
+                {/* Typing Indicators */}
+                {selectedConversation && typingUsers[selectedConversation.id] && typingUsers[selectedConversation.id].length > 0 && (
+                  <div className="px-4 py-2 bg-blue-50 border-t">
+                    <div className="flex items-center space-x-2 text-sm text-blue-600">
+                      <div className="flex space-x-1">
+                        <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce"></div>
+                        <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                        <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                      </div>
+                      <span>
+                        {typingUsers[selectedConversation.id].length === 1 
+                          ? `${typingUsers[selectedConversation.id][0]} is typing...`
+                          : `${typingUsers[selectedConversation.id].length} people are typing...`
+                        }
+                      </span>
+                    </div>
+                  </div>
+                )}
+
                 {/* Message Input */}
                 <div className="p-4 border-t flex-shrink-0">
+                  {/* File Upload Area */}
+                  {selectedFiles.length > 0 && (
+                    <div className="mb-3 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-medium text-blue-800">Selected Files:</span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setSelectedFiles([])}
+                          className="text-blue-600 hover:text-blue-800"
+                        >
+                          Clear All
+                        </Button>
+                      </div>
+                      <div className="space-y-2">
+                        {selectedFiles.map((file, index) => (
+                          <div key={index} className="flex items-center justify-between bg-white p-2 rounded border">
+                            <div className="flex items-center space-x-2">
+                              <File className="h-4 w-4 text-blue-600" />
+                              <span className="text-sm text-gray-700">{file.name}</span>
+                              <span className="text-xs text-gray-500">({(file.size / 1024).toFixed(1)} KB)</span>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setSelectedFiles(prev => prev.filter((_, i) => i !== index))}
+                              className="text-red-600 hover:text-red-800"
+                            >
+                              Remove
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   <div className="flex items-center space-x-2">
+                    {/* File Upload Button */}
+                    <div className="relative">
+                      <input
+                        type="file"
+                        multiple
+                        accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt"
+                        onChange={handleFileSelect}
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                        id="file-upload"
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="cursor-pointer"
+                        asChild
+                      >
+                        <label htmlFor="file-upload" className="cursor-pointer">
+                          <Paperclip className="h-4 w-4" />
+                        </label>
+                      </Button>
+                    </div>
+
+                    {/* Message Input */}
                     <div className="flex-1 relative">
                       <Input
                         placeholder={`Message ${
@@ -863,19 +1369,30 @@ const EnhancedMessagesWidget = () => {
                             : (selectedConversation.display_name || selectedConversation.name || selectedConversation.other_user)
                         }...`}
                         value={newMessage}
-                        onChange={(e) => setNewMessage(e.target.value)}
+                        onChange={(e) => {
+                          setNewMessage(e.target.value);
+                          if (e.target.value.length > 0) {
+                            handleTypingStart();
+                          } else {
+                            handleTypingStop();
+                          }
+                        }}
                         onKeyPress={(e) => {
                           if (e.key === 'Enter' && !e.shiftKey) {
                             e.preventDefault();
+                            handleTypingStop();
                             handleSendMessage();
                           }
                         }}
+                        onBlur={handleTypingStop}
                         className="w-full"
                       />
                     </div>
+
+                    {/* Send Button */}
                     <Button 
                       onClick={handleSendMessage}
-                      disabled={!newMessage.trim() || sendingMessage}
+                      disabled={(!newMessage.trim() && selectedFiles.length === 0) || sendingMessage}
                     >
                       <Send className="h-4 w-4" />
                     </Button>

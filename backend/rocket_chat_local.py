@@ -437,8 +437,8 @@ class RocketChatClient:
             print(f"Exception getting channel ID: {e}")
             return None
 
-    async def send_message_to_channel(self, channel_name: str, text: str, user_headers: Dict = None) -> Dict:
-        """Send message to a channel"""
+    async def send_message_to_channel(self, channel_name: str, text: str, user_headers: Dict = None, attachments: List[Dict] = None) -> Dict:
+        """Send message to a channel with optional file attachments"""
         try:
             # Use user-specific headers if provided, otherwise use default headers
             headers = user_headers if user_headers else self.headers
@@ -454,13 +454,78 @@ class RocketChatClient:
             if not channel_id:
                 return {"success": False, "error": f"Channel '{channel_name}' not found"}
 
+            # If we have attachments, upload them to Rocket.Chat first
+            if attachments and len(attachments) > 0:
+                print(f"DEBUG: Uploading {len(attachments)} files to Rocket.Chat")
+                uploaded_file_ids = []
+                
+                for att in attachments:
+                    try:
+                        print(f"DEBUG: Processing attachment: {att}")
+                        # Download the file from our server
+                        async with httpx.AsyncClient(timeout=30.0) as client:
+                            print(f"DEBUG: Downloading file from: {att.get('url')}")
+                            file_response = await client.get(att.get("url", ""))
+                            print(f"DEBUG: File download response status: {file_response.status_code}")
+                            if file_response.status_code == 200:
+                                file_content = file_response.content
+                                file_name = att.get("filename", "attachment")
+                                file_size = len(file_content)
+                                print(f"DEBUG: Downloaded file: {file_name}, size: {file_size} bytes")
+                                
+                                # Upload to Rocket.Chat using rooms.upload endpoint
+                                files = {"file": (file_name, file_content, att.get("type", "application/octet-stream"))}
+                                data = {
+                                    "msg": text,
+                                    "description": f"Uploaded file: {file_name}"
+                                }
+                                print(f"DEBUG: Uploading to Rocket.Chat: {self.base_url}/api/v1/rooms.upload/{channel_id}")
+                                
+                                # Remove Content-Type header for multipart upload
+                                upload_headers = {k: v for k, v in headers.items() if k.lower() != 'content-type'}
+                                print(f"DEBUG: Upload headers: {upload_headers}")
+                                
+                                async with httpx.AsyncClient(timeout=30.0) as upload_client:
+                                    upload_response = await upload_client.post(
+                                        f"{self.base_url}/api/v1/rooms.upload/{channel_id}",
+                                        files=files,
+                                        data=data,
+                                        headers=upload_headers
+                                    )
+                                    print(f"DEBUG: Rocket.Chat upload response status: {upload_response.status_code}")
+                                    print(f"DEBUG: Rocket.Chat upload response: {upload_response.text}")
+                                    
+                                    if upload_response.status_code == 200:
+                                        upload_result = upload_response.json()
+                                        if upload_result.get('success'):
+                                            uploaded_file_ids.append(upload_result.get('file', {}).get('_id'))
+                                            print(f"DEBUG: Successfully uploaded file {file_name} to Rocket.Chat")
+                                        else:
+                                            print(f"DEBUG: Failed to upload file {file_name}: {upload_result.get('error')}")
+                                    else:
+                                        print(f"DEBUG: Upload failed with status {upload_response.status_code}: {upload_response.text}")
+                            else:
+                                print(f"DEBUG: Failed to download file from {att.get('url')}")
+                    except Exception as e:
+                        print(f"DEBUG: Error uploading file {att.get('filename')}: {e}")
+                
+                # If we successfully uploaded files, return success
+                if uploaded_file_ids:
+                    return {"success": True, "message": f"Message with {len(uploaded_file_ids)} file(s) sent successfully"}
+                else:
+                    # Fall back to sending text message without files
+                    print("DEBUG: No files uploaded successfully, sending text message only")
+            
+            # Send text message (either no attachments or fallback)
+            message_data = {
+                "roomId": channel_id,
+                "text": text
+            }
+
             async with httpx.AsyncClient() as client:
                 response = await client.post(
                     f"{self.base_url}/api/v1/chat.postMessage",
-                    json={
-                        "roomId": channel_id,
-                        "text": text
-                    },
+                    json=message_data,
                     headers=headers
                 )
                 

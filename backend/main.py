@@ -1,10 +1,10 @@
-from fastapi import FastAPI, HTTPException, Depends, status, UploadFile, File
+from fastapi import FastAPI, HTTPException, Depends, status, UploadFile, File, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
-from datetime import timedelta
-from typing import Optional
+from datetime import timedelta, datetime
+from typing import Optional, List
 import os
 import uuid
 import shutil
@@ -1108,8 +1108,11 @@ async def send_message_to_any_channel(
         
         # Send message to the specified channel
         message_text = message_data.get("text", message_data.get("content", ""))
+        attachments = message_data.get("attachments", [])
         print(f"DEBUG: Extracted message text: '{message_text}'")
-        result = await rocket_client.send_message_to_channel(channel_identifier, message_text, user_headers)
+        print(f"DEBUG: Attachments: {len(attachments)} file(s)")
+        print(f"DEBUG: Attachment data: {attachments}")
+        result = await rocket_client.send_message_to_channel(channel_identifier, message_text, user_headers, attachments)
         print(f"DEBUG: Send message result: {result}")
         
         if result.get('success'):
@@ -1328,6 +1331,125 @@ async def get_thread_messages(
     except Exception as e:
         print(f"Error getting thread messages: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get thread messages: {str(e)}")
+
+@app.post("/api/rocket-chat/authenticate")
+async def authenticate_rocket_chat(
+    auth_data: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Authenticate user with Rocket.Chat and return credentials for popup"""
+    try:
+        print(f"DEBUG: Authenticating user {current_user.email} with Rocket.Chat")
+        
+        # First, try to ensure the user exists in Rocket.Chat
+        authenticated = await rocket_client.ensure_authenticated(
+            social_hub_user_email=current_user.email,
+            social_hub_user_name=current_user.full_name,
+            social_hub_user_id=str(current_user.id)
+        )
+        
+        if not authenticated:
+            print(f"DEBUG: Failed to authenticate user {current_user.email} with Rocket.Chat")
+            raise HTTPException(status_code=401, detail="Failed to authenticate with Rocket.Chat")
+        
+        # Get user-specific headers for authentication
+        user_headers = await rocket_client.get_user_headers(
+            social_hub_user_email=current_user.email,
+            social_hub_user_name=current_user.full_name,
+            social_hub_user_id=str(current_user.id),
+            db_session=db
+        )
+        
+        if not user_headers:
+            raise HTTPException(status_code=401, detail="Failed to get user credentials")
+        
+        # Extract username and auth token from headers
+        username = user_headers.get('X-User-Id', current_user.username or current_user.email.split('@')[0])
+        auth_token = user_headers.get('X-Auth-Token', '')
+        
+        if not auth_token:
+            raise HTTPException(status_code=401, detail="No auth token available")
+        
+        print(f"DEBUG: Authentication successful for user {username}")
+        
+        return {
+            "success": True,
+            "username": username,
+            "token": auth_token,
+            "server_url": "http://10.68.0.49:30082"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error authenticating with Rocket.Chat: {e}")
+        raise HTTPException(status_code=500, detail=f"Authentication failed: {str(e)}")
+
+@app.post("/api/rocket-chat/upload-files")
+async def upload_files(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Upload files and return file information"""
+    try:
+        # Parse form data to get files
+        form = await request.form()
+        files = []
+        
+        # Extract files from form data (file_0, file_1, etc.)
+        for key, value in form.items():
+            if key.startswith('file_') and hasattr(value, 'filename'):
+                files.append(value)
+        
+        print(f"DEBUG: Uploading {len(files)} files for user {current_user.email}")
+        
+        uploaded_files = []
+        
+        for file in files:
+            # Validate file size (10MB limit)
+            if file.size > 10 * 1024 * 1024:
+                raise HTTPException(status_code=400, detail=f"File {file.filename} is too large (max 10MB)")
+            
+            # Generate unique filename
+            import uuid
+            file_extension = file.filename.split('.')[-1] if '.' in file.filename else ''
+            unique_filename = f"{uuid.uuid4()}.{file_extension}"
+            
+            # Save file to uploads directory
+            upload_dir = "uploads/chat_images"
+            os.makedirs(upload_dir, exist_ok=True)
+            file_path = os.path.join(upload_dir, unique_filename)
+            
+            with open(file_path, "wb") as buffer:
+                content = await file.read()
+                buffer.write(content)
+            
+            # Create file info with full URL
+            file_info = {
+                "id": str(uuid.uuid4()),
+                "filename": file.filename,
+                "size": file.size,
+                "url": f"http://localhost:8000/uploads/chat_images/{unique_filename}",
+                "type": file.content_type or "application/octet-stream",
+                "uploaded_at": datetime.utcnow().isoformat()
+            }
+            
+            uploaded_files.append(file_info)
+            print(f"DEBUG: File uploaded: {file.filename} -> {file_path}")
+        
+        return {
+            "success": True,
+            "files": uploaded_files,
+            "message": f"Successfully uploaded {len(uploaded_files)} file(s)"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error uploading files: {e}")
+        raise HTTPException(status_code=500, detail=f"File upload failed: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

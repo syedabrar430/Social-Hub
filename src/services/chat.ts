@@ -228,15 +228,23 @@ class ChatService {
   async sendRocketChatChannelMessage(
     channelIdentifier: string,
     text: string,
-    channelType: string = "channel"
+    channelType: string = "channel",
+    attachments: any[] = []
   ): Promise<{ success: boolean; message: string }> {
     const params = new URLSearchParams({
       channel_type: channelType,
     });
     
+    const requestBody = { 
+      text,
+      attachments: attachments.length > 0 ? attachments : undefined
+    };
+    
+    console.log('DEBUG: Service sending message with:', requestBody);
+    
     return this.request<{ success: boolean; message: string }>(`/api/rocket-chat/send-channel-message/${encodeURIComponent(channelIdentifier)}?${params}`, {
       method: 'POST',
-      body: JSON.stringify({ text }),
+      body: JSON.stringify(requestBody),
     });
   }
 
@@ -330,10 +338,20 @@ class ChatService {
   }
 
   // Toggle reaction (add if not present, remove if present)
-  async toggleReaction(messageId: string, emoji: string): Promise<{ success: boolean }> {
+  async toggleReaction(messageId: string, emoji: string, currentReactions: Record<string, string[]> = {}): Promise<{ success: boolean }> {
     try {
-      console.log('Toggling reaction:', { messageId, emoji });
-      const result = await this.request<{ success: boolean }>('/chat/add-reaction', {
+      console.log('Toggling reaction:', { messageId, emoji, currentReactions });
+      
+      // Get current user identifier
+      const currentUser = localStorage.getItem('user_email')?.split('@')[0] || 'unknown';
+      const currentUsers = currentReactions[emoji] || [];
+      const hasReaction = currentUsers.includes(currentUser);
+      
+      console.log('Current user:', currentUser, 'Has reaction:', hasReaction);
+      
+      // If user already has the reaction, remove it; otherwise add it
+      const endpoint = hasReaction ? '/chat/remove-reaction' : '/chat/add-reaction';
+      const result = await this.request<{ success: boolean }>(endpoint, {
         method: 'POST',
         body: JSON.stringify({ message_id: messageId, emoji }),
       });

@@ -1,8 +1,38 @@
-import React from 'react';
+import React, { useState } from 'react';
 import EnhancedMessagesWidget from '@/components/chat/EnhancedMessagesWidget';
+import RocketChatIframe from '@/components/chat/RocketChatIframe';
+import RocketChatPopup from '@/components/chat/RocketChatPopup';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 const Messages: React.FC = () => {
-  return <EnhancedMessagesWidget />;
+  const [activeTab, setActiveTab] = useState('custom');
+
+  return (
+    <div className="h-full">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full">
+        <TabsList className="grid w-full grid-cols-2 mb-4">
+          <TabsTrigger value="custom">Custom Chat</TabsTrigger>
+          <TabsTrigger value="rocketchat">Rocket.Chat</TabsTrigger>
+        </TabsList>
+        
+        <TabsContent value="custom" className="h-[calc(100%-4rem)]">
+          <EnhancedMessagesWidget />
+        </TabsContent>
+        
+        <TabsContent value="rocketchat" className="h-[calc(100%-4rem)]">
+          <div className="h-full p-4 bg-gray-50 rounded-lg">
+            <div className="mb-4">
+              <h3 className="text-lg font-semibold text-gray-800">Rocket.Chat Integration</h3>
+              <p className="text-sm text-gray-600">
+                Full-featured chat with real-time messaging, file sharing, and more.
+              </p>
+            </div>
+            <RocketChatPopup channelName="general" />
+          </div>
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
 };
 
 export default Messages;
