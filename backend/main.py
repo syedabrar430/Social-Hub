@@ -12,9 +12,9 @@ from pathlib import Path
 from google.oauth2 import id_token
 from google.auth.transport import requests
 
-from database import get_db, create_tables, User, ChatMessage
-from schemas import UserRegistration, UserLogin, UserResponse, Token, Message, GoogleAuthRequest, UserProfileUpdate, ChatMessageCreate, ChatMessageResponse
-from crud import create_user, authenticate_user, get_user_by_email, get_user_by_id, create_google_user, get_user_by_google_id, create_chat_message, get_recent_chat_messages
+from database import get_db, create_tables, User, ChatMessage, Group, GroupMember
+from schemas import UserRegistration, UserLogin, UserResponse, Token, Message, GoogleAuthRequest, UserProfileUpdate, ChatMessageCreate, ChatMessageResponse, GroupCreate, GroupUpdate, GroupMemberAdd, GroupMemberRemove, GroupResponse, GroupMemberResponse, UserSearchResponse
+from crud import create_user, authenticate_user, get_user_by_email, get_user_by_id, create_google_user, get_user_by_google_id, create_chat_message, get_recent_chat_messages, create_group, get_group_by_id, get_user_groups, add_member_to_group, remove_member_from_group, get_group_members, search_users, is_user_in_group, update_group, delete_group
 from auth import create_access_token, verify_token, ACCESS_TOKEN_EXPIRE_MINUTES
 from rocket_chat_local import rocket_client
 
@@ -705,9 +705,12 @@ async def get_general_messages(
                 thread_count = msg.get("tcount", 0)
                 thread_messages = []
                 
+                print(f"DEBUG: General Message {msg.get('_id')} - thread_count: {thread_count}, raw tcount: {msg.get('tcount')}")
+                
                 # Only fetch thread messages if there are more than 0 messages in the thread
                 if thread_count > 0:
                     try:
+                        # Temporarily use admin headers instead of user headers for debugging
                         thread_response = await rocket_client.get_thread_messages(msg.get("_id", ""))
                         if thread_response:
                             for thread_msg in thread_response:
@@ -884,10 +887,15 @@ async def get_dm_messages(
             thread_count = msg.get("tcount", 0)
             thread_messages = []
             
+            print(f"DEBUG: DM Message {msg.get('_id')} - thread_count: {thread_count}")
+            print(f"DEBUG: user_headers is None: {user_headers is None}")
+            
             # Only fetch thread messages if there are more than 0 messages in the thread
             if thread_count > 0:
                 try:
-                    thread_response = await rocket_client.get_thread_messages(msg.get("_id", ""))
+                    # Use user-specific headers for DM thread messages (required for DMs)
+                    print(f"DEBUG: Calling get_thread_messages with user_headers: {user_headers is not None}")
+                    thread_response = await rocket_client.get_thread_messages(msg.get("_id", ""), user_headers)
                     if thread_response:
                         for thread_msg in thread_response:
                             if isinstance(thread_msg, dict):
@@ -1160,6 +1168,7 @@ async def get_channel_messages_by_id(
             # Only fetch thread messages if there are more than 0 messages in the thread
             if thread_count > 0:
                 try:
+                    # Temporarily use admin headers instead of user headers for debugging
                     thread_response = await rocket_client.get_thread_messages(msg.get("_id", ""))
                     if thread_response:
                         for thread_msg in thread_response:
@@ -1835,6 +1844,295 @@ async def search_messages(
     except Exception as e:
         print(f"Error searching messages: {e}")
         raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+
+# Group Management Endpoints
+
+@app.post("/groups", response_model=GroupResponse)
+async def create_group_endpoint(
+    group_data: GroupCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Create a new private group"""
+    try:
+        # Create the group
+        group = create_group(db, group_data.dict(), current_user.id)
+        
+        # Get group members for response
+        members = get_group_members(db, group.id)
+        member_responses = [UserResponse.from_orm(member.user) for member in members]
+        
+        return GroupResponse(
+            id=group.id,
+            name=group.name,
+            description=group.description,
+            created_by=group.created_by,
+            created_at=group.created_at,
+            members=member_responses,
+            member_count=len(member_responses)
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create group: {str(e)}")
+
+@app.get("/groups", response_model=List[GroupResponse])
+async def get_user_groups_endpoint(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get all groups for the current user"""
+    try:
+        groups = get_user_groups(db, current_user.id)
+        group_responses = []
+        
+        for group in groups:
+            members = get_group_members(db, group.id)
+            member_responses = [UserResponse.from_orm(member.user) for member in members]
+            
+            group_responses.append(GroupResponse(
+                id=group.id,
+                name=group.name,
+                description=group.description,
+                created_by=group.created_by,
+                created_at=group.created_at,
+                members=member_responses,
+                member_count=len(member_responses)
+            ))
+        
+        return group_responses
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get groups: {str(e)}")
+
+@app.get("/groups/{group_id}", response_model=GroupResponse)
+async def get_group_endpoint(
+    group_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get a specific group by ID"""
+    try:
+        group = get_group_by_id(db, group_id)
+        if not group:
+            raise HTTPException(status_code=404, detail="Group not found")
+        
+        # Check if user is a member
+        if not is_user_in_group(db, group_id, current_user.id):
+            raise HTTPException(status_code=403, detail="Access denied: You are not a member of this group")
+        
+        members = get_group_members(db, group.id)
+        member_responses = [UserResponse.from_orm(member.user) for member in members]
+        
+        return GroupResponse(
+            id=group.id,
+            name=group.name,
+            description=group.description,
+            created_by=group.created_by,
+            created_at=group.created_at,
+            members=member_responses,
+            member_count=len(member_responses)
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get group: {str(e)}")
+
+@app.put("/groups/{group_id}", response_model=GroupResponse)
+async def update_group_endpoint(
+    group_id: int,
+    group_data: GroupUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Update group information (only by creator)"""
+    try:
+        group = get_group_by_id(db, group_id)
+        if not group:
+            raise HTTPException(status_code=404, detail="Group not found")
+        
+        # Check if user is the creator
+        if group.created_by != current_user.id:
+            raise HTTPException(status_code=403, detail="Access denied: Only the group creator can update the group")
+        
+        # Update the group
+        updated_group = update_group(db, group_id, group_data.dict(exclude_unset=True))
+        if not updated_group:
+            raise HTTPException(status_code=404, detail="Group not found")
+        
+        # Get updated group members
+        members = get_group_members(db, updated_group.id)
+        member_responses = [UserResponse.from_orm(member.user) for member in members]
+        
+        return GroupResponse(
+            id=updated_group.id,
+            name=updated_group.name,
+            description=updated_group.description,
+            created_by=updated_group.created_by,
+            created_at=updated_group.created_at,
+            members=member_responses,
+            member_count=len(member_responses)
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update group: {str(e)}")
+
+@app.delete("/groups/{group_id}")
+async def delete_group_endpoint(
+    group_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Delete a group (only by creator)"""
+    try:
+        group = get_group_by_id(db, group_id)
+        if not group:
+            raise HTTPException(status_code=404, detail="Group not found")
+        
+        # Check if user is the creator
+        if group.created_by != current_user.id:
+            raise HTTPException(status_code=403, detail="Access denied: Only the group creator can delete the group")
+        
+        success = delete_group(db, group_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Group not found")
+        
+        return {"message": "Group deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete group: {str(e)}")
+
+@app.post("/groups/{group_id}/members", response_model=GroupMemberResponse)
+async def add_member_to_group_endpoint(
+    group_id: int,
+    member_data: GroupMemberAdd,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Add a member to a group"""
+    try:
+        group = get_group_by_id(db, group_id)
+        if not group:
+            raise HTTPException(status_code=404, detail="Group not found")
+        
+        # Check if current user is a member of the group
+        if not is_user_in_group(db, group_id, current_user.id):
+            raise HTTPException(status_code=403, detail="Access denied: You are not a member of this group")
+        
+        # Find the user to add
+        user_to_add = get_user_by_email(db, member_data.user_email)
+        if not user_to_add:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Add the user to the group
+        member = add_member_to_group(db, group_id, user_to_add.id)
+        if not member:
+            raise HTTPException(status_code=400, detail="User is already a member of this group")
+        
+        return GroupMemberResponse(
+            id=member.id,
+            group_id=member.group_id,
+            user_id=member.user_id,
+            joined_at=member.joined_at,
+            user=UserResponse.from_orm(member.user)
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to add member: {str(e)}")
+
+@app.delete("/groups/{group_id}/members/{user_id}")
+async def remove_member_from_group_endpoint(
+    group_id: int,
+    user_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Remove a member from a group"""
+    try:
+        group = get_group_by_id(db, group_id)
+        if not group:
+            raise HTTPException(status_code=404, detail="Group not found")
+        
+        # Check if current user is the creator or the member being removed
+        if group.created_by != current_user.id and current_user.id != user_id:
+            raise HTTPException(status_code=403, detail="Access denied: Only the group creator or the member themselves can remove members")
+        
+        # Check if the user is actually a member
+        if not is_user_in_group(db, group_id, user_id):
+            raise HTTPException(status_code=404, detail="User is not a member of this group")
+        
+        # Prevent creator from removing themselves
+        if group.created_by == user_id:
+            raise HTTPException(status_code=400, detail="Group creator cannot remove themselves from the group")
+        
+        success = remove_member_from_group(db, group_id, user_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="User is not a member of this group")
+        
+        return {"message": "Member removed successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to remove member: {str(e)}")
+
+@app.get("/groups/{group_id}/members", response_model=List[GroupMemberResponse])
+async def get_group_members_endpoint(
+    group_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get all members of a group"""
+    try:
+        group = get_group_by_id(db, group_id)
+        if not group:
+            raise HTTPException(status_code=404, detail="Group not found")
+        
+        # Check if user is a member
+        if not is_user_in_group(db, group_id, current_user.id):
+            raise HTTPException(status_code=403, detail="Access denied: You are not a member of this group")
+        
+        members = get_group_members(db, group_id)
+        return [
+            GroupMemberResponse(
+                id=member.id,
+                group_id=member.group_id,
+                user_id=member.user_id,
+                joined_at=member.joined_at,
+                user=UserResponse.from_orm(member.user)
+            )
+            for member in members
+        ]
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get group members: {str(e)}")
+
+@app.get("/users/search", response_model=List[UserSearchResponse])
+async def search_users_endpoint(
+    query: str,
+    limit: int = 10,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Search for users by name or email"""
+    try:
+        if len(query.strip()) < 2:
+            raise HTTPException(status_code=400, detail="Query must be at least 2 characters long")
+        
+        users = search_users(db, query.strip(), limit)
+        return [
+            UserSearchResponse(
+                id=user.id,
+                full_name=user.full_name,
+                email=user.email,
+                profile_picture_url=user.profile_picture_url
+            )
+            for user in users
+        ]
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to search users: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

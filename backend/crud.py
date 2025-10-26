@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
-from database import User, ChatMessage, AuthProvider
+from database import User, ChatMessage, AuthProvider, Group, GroupMember
 from auth import get_password_hash, verify_password
 from schemas import UserRegistration, ChatMessageCreate
 from typing import Optional, Dict, Any, List
@@ -87,3 +87,117 @@ def get_chat_messages_after(db: Session, after_timestamp: datetime, limit: int =
             .order_by(ChatMessage.created_at)
             .limit(limit)
             .all())
+
+# Group-related CRUD functions
+def create_group(db: Session, group_data: dict, creator_id: int) -> Group:
+    """Create a new group"""
+    db_group = Group(
+        name=group_data["name"],
+        description=group_data.get("description"),
+        created_by=creator_id
+    )
+    db.add(db_group)
+    db.flush()  # Get the ID
+    
+    # Add creator as first member
+    creator_member = GroupMember(
+        group_id=db_group.id,
+        user_id=creator_id
+    )
+    db.add(creator_member)
+    db.commit()
+    db.refresh(db_group)
+    return db_group
+
+def get_group_by_id(db: Session, group_id: int) -> Optional[Group]:
+    """Get group by ID"""
+    return db.query(Group).filter(Group.id == group_id).first()
+
+def get_user_groups(db: Session, user_id: int) -> List[Group]:
+    """Get all groups for a user"""
+    return (db.query(Group)
+            .join(GroupMember)
+            .filter(GroupMember.user_id == user_id)
+            .order_by(desc(Group.created_at))
+            .all())
+
+def add_member_to_group(db: Session, group_id: int, user_id: int) -> Optional[GroupMember]:
+    """Add a user to a group"""
+    # Check if user is already a member
+    existing_member = db.query(GroupMember).filter(
+        GroupMember.group_id == group_id,
+        GroupMember.user_id == user_id
+    ).first()
+    
+    if existing_member:
+        return None  # User already in group
+    
+    member = GroupMember(
+        group_id=group_id,
+        user_id=user_id
+    )
+    db.add(member)
+    db.commit()
+    db.refresh(member)
+    return member
+
+def remove_member_from_group(db: Session, group_id: int, user_id: int) -> bool:
+    """Remove a user from a group"""
+    member = db.query(GroupMember).filter(
+        GroupMember.group_id == group_id,
+        GroupMember.user_id == user_id
+    ).first()
+    
+    if member:
+        db.delete(member)
+        db.commit()
+        return True
+    return False
+
+def get_group_members(db: Session, group_id: int) -> List[GroupMember]:
+    """Get all members of a group"""
+    return (db.query(GroupMember)
+            .filter(GroupMember.group_id == group_id)
+            .all())
+
+def search_users(db: Session, query: str, limit: int = 10) -> List[User]:
+    """Search users by name or email"""
+    search_term = f"%{query}%"
+    return (db.query(User)
+            .filter(
+                (User.full_name.ilike(search_term)) |
+                (User.email.ilike(search_term))
+            )
+            .filter(User.is_active == True)
+            .limit(limit)
+            .all())
+
+def is_user_in_group(db: Session, group_id: int, user_id: int) -> bool:
+    """Check if user is a member of the group"""
+    member = db.query(GroupMember).filter(
+        GroupMember.group_id == group_id,
+        GroupMember.user_id == user_id
+    ).first()
+    return member is not None
+
+def update_group(db: Session, group_id: int, group_data: dict) -> Optional[Group]:
+    """Update group information"""
+    group = db.query(Group).filter(Group.id == group_id).first()
+    if group:
+        if "name" in group_data:
+            group.name = group_data["name"]
+        if "description" in group_data:
+            group.description = group_data["description"]
+        group.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(group)
+    return group
+
+def delete_group(db: Session, group_id: int) -> bool:
+    """Delete a group (only by creator)"""
+    group = db.query(Group).filter(Group.id == group_id).first()
+    if group:
+        db.delete(group)
+        db.commit()
+        return True
+    return False

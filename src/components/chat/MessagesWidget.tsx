@@ -148,7 +148,9 @@ const MessagesWidget = () => {
       const message = messages.find(m => m.id === messageId);
       if (!message || !message.reactions) return;
 
-      const hasReacted = message.reactions[emoji]?.includes('ankush1'); // Replace with actual current user
+      // Get current user identifier
+      const currentUser = localStorage.getItem('user_email')?.split('@')[0] || 'unknown';
+      const hasReacted = message.reactions[emoji]?.includes(currentUser);
       
       if (hasReacted) {
         await chatService.removeReaction(messageId, emoji);
@@ -268,9 +270,9 @@ const MessagesWidget = () => {
                         console.log('🗓️ Processing messages for date separators:', messages.length, 'messages');
                         
                         messages.forEach((message, index) => {
-                          // Skip thread messages - they should only be shown when explicitly loaded
+                          // Skip thread messages - they should only be shown when explicitly loaded as part of parent
                           if (message.is_thread_message) {
-                            console.log(`🚫 MessagesWidget: Skipping thread message ${message.id}`);
+                            console.log(`🧵 MessagesWidget: Skipping thread message ${message.id}`);
                             return;
                           }
                           
@@ -329,16 +331,24 @@ const MessagesWidget = () => {
                                   {/* Reactions */}
                                   {message.reactions && Object.keys(message.reactions).length > 0 && (
                                     <div className="flex flex-wrap gap-1 mt-2">
-                                      {Object.entries(message.reactions).map(([emoji, usernames]) => (
-                                        <button
-                                          key={emoji}
-                                          onClick={() => handleReactionToggle(message.id, emoji)}
-                                          className="flex items-center space-x-1 px-2 py-1 rounded-full bg-secondary/50 hover:bg-secondary text-xs"
-                                        >
-                                          <span>{emoji}</span>
-                                          <span>{usernames.length}</span>
-                                        </button>
-                                      ))}
+                                      {Object.entries(message.reactions).map(([emoji, usernames]) => {
+                                        const currentUser = localStorage.getItem('user_email')?.split('@')[0] || 'unknown';
+                                        const hasReacted = usernames.includes(currentUser);
+                                        return (
+                                          <button
+                                            key={emoji}
+                                            onClick={() => handleReactionToggle(message.id, emoji)}
+                                            className={`flex items-center space-x-1 px-2 py-1 rounded-full text-xs transition-colors ${
+                                              hasReacted 
+                                                ? 'bg-primary text-primary-foreground hover:bg-primary/80' 
+                                                : 'bg-secondary/50 hover:bg-secondary'
+                                            }`}
+                                          >
+                                            <span>{emoji}</span>
+                                            <span>{usernames.length}</span>
+                                          </button>
+                                        );
+                                      })}
                                     </div>
                                   )}
                                   

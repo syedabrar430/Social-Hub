@@ -773,29 +773,48 @@ class RocketChatClient:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    async def get_thread_messages(self, parent_message_id: str) -> List[Dict]:
+    async def get_thread_messages(self, parent_message_id: str, user_headers: Dict = None) -> List[Dict]:
         """Get thread messages for a parent message"""
         try:
-            if not await self.ensure_authenticated():
-                return []
+            print(f"DEBUG: Getting thread messages for parent message: {parent_message_id}")
+            print(f"DEBUG: user_headers provided: {user_headers is not None}")
+            
+            # Use user-specific headers if provided, otherwise use admin headers
+            if user_headers:
+                headers = user_headers
+                print(f"DEBUG: Using user-specific headers for thread messages")
+                print(f"DEBUG: User headers X-User-Id: {headers.get('X-User-Id', 'N/A')}")
+            else:
+                if not await self.ensure_authenticated():
+                    return []
+                headers = self.headers
+                print(f"DEBUG: Using admin headers for thread messages")
             
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(
                     f"{self.base_url}/api/v1/chat.getThreadMessages",
-                    headers=self.headers,
+                    headers=headers,
                     params={
                         "tmid": parent_message_id,
                         "count": 50
                     }
                 )
                 
+                print(f"DEBUG: Thread messages API response status: {response.status_code}")
+                
                 if response.status_code == 200:
                     result = response.json()
+                    print(f"DEBUG: Thread messages API response: {result}")
                     if result.get('success'):
-                        return result.get('messages', [])
+                        messages = result.get('messages', [])
+                        print(f"DEBUG: Found {len(messages)} thread messages")
+                        return messages
                     else:
+                        print(f"DEBUG: Thread messages API failed: {result.get('error', 'Unknown error')}")
                         return []
                 else:
+                    print(f"DEBUG: Thread messages API error: HTTP {response.status_code}")
+                    print(f"DEBUG: Error response: {response.text}")
                     return []
                     
         except Exception as e:

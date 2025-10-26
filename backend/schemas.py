@@ -1,6 +1,6 @@
 from pydantic import BaseModel, EmailStr
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 from enum import Enum
 
 # Auth provider enum
@@ -73,6 +73,52 @@ class ChatMessageResponse(BaseModel):
     message: str
     timestamp: datetime
     avatar_url: Optional[str] = None
+    
+    class Config:
+        from_attributes = True
+
+# Group-related schemas
+class GroupCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+
+class GroupUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+
+class GroupMemberAdd(BaseModel):
+    user_email: str
+
+class GroupMemberRemove(BaseModel):
+    user_id: int
+
+class GroupResponse(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+    created_by: int
+    created_at: datetime
+    members: List[UserResponse]
+    member_count: int
+    
+    class Config:
+        from_attributes = True
+
+class GroupMemberResponse(BaseModel):
+    id: int
+    group_id: int
+    user_id: int
+    joined_at: datetime
+    user: UserResponse
+    
+    class Config:
+        from_attributes = True
+
+class UserSearchResponse(BaseModel):
+    id: int
+    full_name: str
+    email: str
+    profile_picture_url: Optional[str] = None
     
     class Config:
         from_attributes = True

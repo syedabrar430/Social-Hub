@@ -62,8 +62,40 @@ class ChatMessage(Base):
     # Relationship to user
     user = relationship("User", back_populates="chat_messages")
 
+# Group model
+class Group(Base):
+    __tablename__ = "groups"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    creator = relationship("User", foreign_keys=[created_by])
+    members = relationship("GroupMember", back_populates="group", cascade="all, delete-orphan")
+
+# Group Member model
+class GroupMember(Base):
+    __tablename__ = "group_members"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    group_id = Column(Integer, ForeignKey("groups.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    joined_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    group = relationship("Group", back_populates="members")
+    user = relationship("User")
+    
+    # Ensure unique user per group
+    __table_args__ = ({"extend_existing": True},)
+
 # Add relationship to User model
 User.chat_messages = relationship("ChatMessage", back_populates="user", order_by=ChatMessage.created_at)
+User.groups = relationship("GroupMember", back_populates="user")
 
 # Create tables
 def create_tables():
