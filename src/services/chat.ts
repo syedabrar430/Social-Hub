@@ -160,11 +160,16 @@ class ChatService {
   // Get channels that have messages > 0
   async getChannelsWithMessages(): Promise<ChatConversation[]> {
     try {
-      // First get all channels
-      const allChannels = await this.getRocketChatChannels();
+      // Get all rooms (channels, groups, DMs)
+      const allRooms = await this.getAllRocketChatRooms();
       
-      // Return all channels - let the frontend handle display logic
-      return allChannels;
+      // Combine channels and groups
+      const channelsAndGroups = [
+        ...(allRooms.channels || []),
+        ...(allRooms.groups || [])
+      ];
+      
+      return channelsAndGroups;
     } catch (error) {
       console.error('Failed to get channels with messages:', error);
       throw error;

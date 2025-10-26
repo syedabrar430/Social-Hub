@@ -70,6 +70,7 @@ class Group(Base):
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    rocket_chat_group_id = Column(String(255), nullable=True)  # Rocket.Chat group ID
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     

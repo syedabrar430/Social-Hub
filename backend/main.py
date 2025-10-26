@@ -1342,7 +1342,7 @@ async def send_message_to_any_channel(
         print(f"DEBUG: Extracted message text: '{message_text}'")
         print(f"DEBUG: Attachments: {len(attachments)} file(s)")
         print(f"DEBUG: Attachment data: {attachments}")
-        result = await rocket_client.send_message_to_channel(channel_identifier, message_text, user_headers, attachments)
+        result = await rocket_client.send_message_to_channel(channel_identifier, message_text, user_headers, attachments, channel_type)
         print(f"DEBUG: Send message result: {result}")
         
         if result.get('success'):
@@ -1842,11 +1842,9 @@ async def create_group_endpoint(
                 detail=f"Failed to create Rocket.Chat group: {rocket_group_result.get('error', 'Unknown error')}"
             )
         
-        # Create the group in our database
-        group = create_group(db, group_data.dict(), current_user.id)
-        
-        # Store Rocket.Chat group ID in the database (we'll need to add this field)
-        # For now, we'll just create the local group
+        # Create the group in our database with Rocket.Chat group ID
+        rocket_group_id = rocket_group_result.get('group_id')
+        group = create_group(db, group_data.dict(), current_user.id, rocket_group_id)
         
         # Get group members for response
         members = get_group_members(db, group.id)
@@ -2023,11 +2021,25 @@ async def add_member_to_group_endpoint(
             db_session=db
         )
         
-        # Add the user to the Rocket.Chat group (if we have the group ID)
-        # For now, we'll just add to our local database
-        # TODO: Integrate with Rocket.Chat group when we store the group ID
+        # Add the user to the Rocket.Chat group if we have the group ID
+        if group.rocket_chat_group_id:
+            # Get the user's Rocket.Chat username
+            rocket_username = user_to_add.email.split('@')[0]
+            
+            # Add member to Rocket.Chat group
+            rocket_result = await rocket_client.add_member_to_group(
+                group_id=group.rocket_chat_group_id,
+                username=rocket_username,
+                user_headers=user_headers
+            )
+            
+            if not rocket_result.get('success'):
+                raise HTTPException(
+                    status_code=500, 
+                    detail=f"Failed to add member to Rocket.Chat group: {rocket_result.get('error', 'Unknown error')}"
+                )
         
-        # Add the user to the group
+        # Add the user to the group in our database
         member = add_member_to_group(db, group_id, user_to_add.id)
         if not member:
             raise HTTPException(status_code=400, detail="User is already a member of this group")

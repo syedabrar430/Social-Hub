@@ -532,8 +532,8 @@ class RocketChatClient:
             print(f"Exception adding member to group: {e}")
             return {"success": False, "error": str(e)}
 
-    async def send_message_to_channel(self, channel_name: str, text: str, user_headers: Dict = None, attachments: List[Dict] = None) -> Dict:
-        """Send message to a channel with optional file attachments"""
+    async def send_message_to_channel(self, channel_name: str, text: str, user_headers: Dict = None, attachments: List[Dict] = None, channel_type: str = "channel") -> Dict:
+        """Send message to a channel or group with optional file attachments"""
         try:
             # Use user-specific headers if provided, otherwise use default headers
             headers = user_headers if user_headers else self.headers
@@ -545,9 +545,14 @@ class RocketChatClient:
                 if not await self.ensure_authenticated():
                     return {"success": False, "error": "Failed to authenticate with Rocket.Chat"}
             
-            channel_id = await self.get_or_create_channel(channel_name, user_headers)
+            # Get channel/group ID based on type
+            if channel_type == "group":
+                channel_id = await self.get_channel_id_by_name(channel_name, "group", user_headers)
+            else:
+                channel_id = await self.get_or_create_channel(channel_name, user_headers)
+            
             if not channel_id:
-                return {"success": False, "error": f"Channel '{channel_name}' not found"}
+                return {"success": False, "error": f"{channel_type.title()} '{channel_name}' not found"}
 
             # If we have attachments, upload them to Rocket.Chat first
             if attachments and len(attachments) > 0:

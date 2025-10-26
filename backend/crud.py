@@ -89,12 +89,13 @@ def get_chat_messages_after(db: Session, after_timestamp: datetime, limit: int =
             .all())
 
 # Group-related CRUD functions
-def create_group(db: Session, group_data: dict, creator_id: int) -> Group:
+def create_group(db: Session, group_data: dict, creator_id: int, rocket_chat_group_id: str = None) -> Group:
     """Create a new group"""
     db_group = Group(
         name=group_data["name"],
         description=group_data.get("description"),
-        created_by=creator_id
+        created_by=creator_id,
+        rocket_chat_group_id=rocket_chat_group_id
     )
     db.add(db_group)
     db.flush()  # Get the ID
