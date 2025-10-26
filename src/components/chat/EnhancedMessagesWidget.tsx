@@ -638,17 +638,24 @@ const EnhancedMessagesWidget: React.FC<EnhancedMessagesWidgetProps> = ({ openGro
 
   const handleSendThreadReply = async (parentMessageId: string) => {
     const replyText = threadReplyText[parentMessageId];
-    if (!replyText?.trim() || sendingThreadReply === parentMessageId) return;
+    if (!replyText?.trim() || sendingThreadReply === parentMessageId) {
+      console.log('🚫 Thread reply blocked:', { 
+        hasText: !!replyText?.trim(), 
+        isSending: sendingThreadReply === parentMessageId,
+        replyText: replyText 
+      });
+      return;
+    }
 
-    console.log('DEBUG: Sending thread reply:', { parentMessageId, replyText, selectedConversation });
-    console.log('DEBUG: Selected conversation details:', {
-      id: selectedConversation?.id,
-      name: selectedConversation?.name,
-      type: selectedConversation?.type,
-      display_name: selectedConversation?.display_name,
-      other_user: selectedConversation?.other_user
+    console.log('🚀 Starting thread reply:', { 
+      parentMessageId, 
+      replyText, 
+      selectedConversation: selectedConversation?.name,
+      conversationType: selectedConversation?.type
     });
+    
     setSendingThreadReply(parentMessageId);
+    
     try {
       // Use the same channel identifier logic as main message sending
       let roomIdentifier;
@@ -683,42 +690,57 @@ const EnhancedMessagesWidget: React.FC<EnhancedMessagesWidgetProps> = ({ openGro
       await rocketChatService.sendThreadMessage(roomIdentifier || '', parentMessageId, replyText);
       setThreadReplyText(prev => ({ ...prev, [parentMessageId]: '' }));
       
-      // Add the thread reply to the thread messages instead of reloading
+      // Add the thread message to local state immediately (optimistic update)
+      console.log('🔄 Adding thread message to local state optimistically');
       const newThreadMessage: ChatMessage = {
         id: Date.now().toString(), // Temporary ID
         text: replyText,
         content: replyText,
-        sender: user?.email?.split('@')[0] || user?.name || 'You', // Set sender to current user
         user: {
-          id: user?.id?.toString() || '',
+          id: user?.id || 'current-user',
           username: user?.email?.split('@')[0] || user?.name || 'You',
-          name: user?.name || 'You'
+          name: user?.name || 'You',
+          email: user?.email || '',
         },
         timestamp: new Date().toISOString(),
-        type: 'message',
         is_thread_message: true,
-        isOwn: true // Mark as own message
+        thread_ts: parentMessageId,
+        tmid: parentMessageId,
+        isOwn: true,
       };
       
+      // Add to thread messages state
       setThreadMessages(prev => ({
         ...prev,
         [parentMessageId]: [...(prev[parentMessageId] || []), newThreadMessage]
       }));
       
-      // Update the thread count on the parent message
-      setMessages(prev => prev.map(msg => {
-        if (msg.id === parentMessageId) {
-          const currentCount = msg.thread_count || 0;
-          return {
-            ...msg,
-            thread_count: currentCount + 1
-          };
-        }
-        return msg;
-      }));
+      console.log('✅ Thread message added to local state');
+      
+      // Note: Using optimistic updates instead of server reload to avoid race conditions
+      
+      console.log('✅ Thread reply sent successfully!');
+      toast({
+        title: "Thread message sent!",
+        description: "Your reply has been sent",
+      });
     } catch (error) {
-      console.error('Failed to send thread reply:', error);
+      console.error('❌ Failed to send thread reply:', error);
+      console.error('❌ Error details:', {
+        message: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined,
+        parentMessageId,
+        replyText,
+        selectedConversation: selectedConversation?.name
+      });
+      
+      toast({
+        title: "Error",
+        description: "Failed to send thread message. Please try again.",
+        variant: "destructive",
+      });
     } finally {
+      console.log('🔄 Cleaning up thread reply state for:', parentMessageId);
       setSendingThreadReply(null);
     }
   };
@@ -1209,15 +1231,8 @@ const EnhancedMessagesWidget: React.FC<EnhancedMessagesWidgetProps> = ({ openGro
                           const currentUserName = user?.name?.toLowerCase().replace(/\s+/g, ''); // e.g., 'ankushchhabra'
                           const currentUserFullName = user?.name; // e.g., 'Ankush Chhabra'
                           
-                          // Check multiple possible sender formats
-                          const isOwnMessage = message.user?.username === currentUserUsername || 
-                                             message.user?.username === currentUserName ||
-                                             message.user?.name === user?.name ||
-                                             message.sender === currentUserUsername ||
-                                             message.sender === currentUserName ||
-                                             message.sender === currentUserFullName ||
-                                             message.sender === user?.name || // Direct match for current user's full name
-                                             message.isOwn === true;
+                          // Simple: Use the isOwn flag from backend (it's already calculated correctly)
+                          const isOwnMessage = message.isOwn === true;
                           
                           console.log('🔍 Message ownership check:', {
                             messageId: message.id,
@@ -1449,20 +1464,14 @@ const EnhancedMessagesWidget: React.FC<EnhancedMessagesWidgetProps> = ({ openGro
                               {/* Thread messages */}
                               {openThreads.has(message.id) && threadMessages[message.id] && (
                                 <div className="mt-2 space-y-2">
-                                  {threadMessages[message.id].map((threadMsg) => {
+                                  {(Array.isArray(threadMessages[message.id]) ? threadMessages[message.id] : []).map((threadMsg) => {
                                     // Determine if this thread message is from the current user
                                     const currentUserUsername = user?.email?.split('@')[0];
                                     const currentUserName = user?.name?.toLowerCase().replace(/\s+/g, '');
                                     const currentUserFullName = user?.name;
                                     
-                                    const isOwnThreadMessage = threadMsg.user?.username === currentUserUsername || 
-                                                              threadMsg.user?.username === currentUserName ||
-                                                              threadMsg.user?.name === user?.name ||
-                                                              threadMsg.sender === currentUserUsername ||
-                                                              threadMsg.sender === currentUserName ||
-                                                              threadMsg.sender === currentUserFullName ||
-                                                              threadMsg.sender === user?.name ||
-                                                              threadMsg.isOwn === true;
+                                    // Simple: Use the isOwn flag from backend
+                                    const isOwnThreadMessage = threadMsg.isOwn === true;
                                     
                                     return (
                                       <div key={threadMsg.id} className="ml-6 border-l-2 border-muted pl-4">
@@ -1495,16 +1504,21 @@ const EnhancedMessagesWidget: React.FC<EnhancedMessagesWidgetProps> = ({ openGro
                                         value={threadReplyText[message.id] || ''}
                                         onChange={(e) => setThreadReplyText(prev => ({ ...prev, [message.id]: e.target.value }))}
                                         className="flex-1 text-sm"
-                                        onKeyPress={(e) => {
+                                        onKeyDown={(e) => {
                                           if (e.key === 'Enter' && !e.shiftKey) {
                                             e.preventDefault();
+                                            e.stopPropagation();
                                             handleSendThreadReply(message.id);
                                           }
                                         }}
                                       />
                                       <Button
                                         size="sm"
-                                        onClick={() => handleSendThreadReply(message.id)}
+                                        onClick={(e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          handleSendThreadReply(message.id);
+                                        }}
                                         disabled={!threadReplyText[message.id]?.trim() || sendingThreadReply === message.id}
                                       >
                                         {sendingThreadReply === message.id ? 'Sending...' : 'Reply'}

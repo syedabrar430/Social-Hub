@@ -335,7 +335,8 @@ class ChatService {
   // Get direct messages list
   async getDirectMessagesList(): Promise<ChatConversation[]> {
     try {
-      const response = await this.request<{ dms: ChatConversation[] }>('/api/rocket-chat/dm-list');
+      // Use the complete DM list endpoint that includes all Social Hub users
+      const response = await this.request<{ dms: ChatConversation[] }>('/api/rocket-chat/dm-list-complete');
       
       // Return the DMs from the response
       return response.dms || [];

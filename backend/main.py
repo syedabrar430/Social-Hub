@@ -8,6 +8,7 @@ from typing import Optional, List
 import os
 import uuid
 import shutil
+import httpx
 from pathlib import Path
 from google.oauth2 import id_token
 from google.auth.transport import requests
@@ -726,17 +727,47 @@ async def get_general_messages(
                         display_emoji = emoji_display_map.get(emoji, emoji)
                         reactions[display_emoji] = reaction_data.get("usernames", [])
                 
+                # Determine if this message is from the current user
+                current_user_username = current_user.email.split('@')[0]  # e.g., 'ankush15'
+                message_username = user_data.get("username", "")
+                message_name = user_data.get("name", "")
+                
+                is_own_message = not is_system and (
+                    message_username == current_user_username or
+                    message_username == current_user.email.split('@')[0] or
+                    message_name == current_user.full_name
+                )
+                
+                # Debug logging for message ownership
+                print(f"🔍 Message ownership check for message {msg.get('_id', 'unknown')}:")
+                print(f"   Current user email: {current_user.email}")
+                print(f"   Current user username: {current_user_username}")
+                print(f"   Current user full name: {current_user.full_name}")
+                print(f"   Raw user_data: {user_data}")
+                print(f"   Message username: '{message_username}'")
+                print(f"   Message name: '{message_name}'")
+                print(f"   Is system message: {is_system}")
+                print(f"   Is own message: {is_own_message}")
+                print(f"   Username match: {message_username == current_user_username}")
+                print(f"   Name match: {message_name == current_user.full_name}")
+                print("---")
+                
                 formatted_message = {
                     "id": msg.get("_id", f"msg-{i}"),
                     "sender": "System" if is_system else (user_data.get("name") or user_data.get("username", "Unknown")),
                     "content": msg.get("msg", ""),
                     "timestamp": timestamp,
-                    "isOwn": not is_system and user_data.get("username") == "ankush1",  # System messages are never own
+                    "isOwn": is_own_message,
                     "avatar": None,  # Rocket.Chat doesn't provide avatar URLs directly
                     "type": "system" if is_system else "message",
                     "reactions": reactions,
                     "thread_count": thread_count,
-                    "thread_messages": thread_messages
+                    "thread_messages": thread_messages,
+                    "user": {
+                        "id": user_data.get("_id", ""),
+                        "username": user_data.get("username", ""),
+                        "name": user_data.get("name", "")
+                    }
                 }
                 formatted_messages.append(formatted_message)
                 print(f"DEBUG: Formatted message {i}: {formatted_message}")
@@ -754,14 +785,26 @@ async def get_general_messages(
 @app.post("/api/rocket-chat/send-message")
 async def send_message_to_general(
     message_data: dict,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """Send message to Rocket.Chat general channel"""
     try:
         print(f"DEBUG: Sending message to general channel from user: {current_user.email}")
         
-        # Send message to general channel (authentication handled internally)
-        result = await rocket_client.send_message_to_channel("general", message_data.get("content", ""))
+        # Get user-specific headers for API calls
+        user_headers = await rocket_client.get_user_headers(
+            social_hub_user_email=current_user.email,
+            social_hub_user_name=current_user.full_name,
+            social_hub_user_id=str(current_user.id),
+            db_session=db
+        )
+        
+        if not user_headers:
+            raise HTTPException(status_code=401, detail="Failed to get user authentication headers")
+        
+        # Send message to general channel using user-specific authentication
+        result = await rocket_client.send_message_to_channel("general", message_data.get("content", ""), user_headers)
         print(f"DEBUG: Send message result: {result}")
         
         if result.get('success'):
@@ -931,12 +974,21 @@ async def get_dm_messages(
                     "preview": None
                 })
             
+            # Determine if this message is from the current user
+            current_user_username = current_user.email.split('@')[0]  # e.g., 'ankush15'
+            message_username = user_data.get("username", "")
+            is_own_message = (
+                message_username == current_user_username or
+                message_username == current_user.email.split('@')[0] or
+                user_data.get("name") == current_user.full_name
+            )
+            
             formatted_message = {
                 "id": msg.get("_id", f"dm-{i}"),
                 "sender": sender_name,
                 "content": msg.get("msg", ""),
                 "timestamp": timestamp,
-                "isOwn": user_data.get("username") == "ankush1",
+                "isOwn": is_own_message,
                 "avatar": None,
                 "type": "message",
                 "reactions": reactions,
@@ -953,6 +1005,48 @@ async def get_dm_messages(
     except Exception as e:
         print(f"Error getting DM messages with {username}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get DM messages: {str(e)}")
+
+@app.get("/api/rocket-chat/dm-list-complete")
+async def get_complete_dm_list(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Get all DM conversations including users from Social Hub database"""
+    try:
+        print(f"DEBUG: Fetching complete DM list for user: {current_user.email}")
+        
+        # Test connection first
+        connection_ok = await rocket_client.test_connection()
+        if not connection_ok:
+            raise HTTPException(
+                status_code=503, 
+                detail="Rocket.Chat server not accessible or authentication failed. Please check your credentials in .env file."
+            )
+        
+        # Get user-specific headers for API calls
+        user_headers = await rocket_client.get_user_headers(
+            social_hub_user_email=current_user.email,
+            social_hub_user_name=current_user.full_name,
+            social_hub_user_id=str(current_user.id),
+            db_session=db
+        )
+        
+        if not user_headers:
+            raise HTTPException(
+                status_code=401, 
+                detail="Failed to get user authentication. Please check your credentials."
+            )
+        
+        # Simple: Get DMs from Rocket.Chat (already filtered for messages > 0)
+        rooms = await rocket_client.get_all_user_rooms(user_headers=user_headers)
+        dms = rooms['direct_messages']
+        
+        print(f"DEBUG: Found {len(dms)} DMs with messages > 0")
+        print(f"DEBUG: DM users: {[dm.get('other_user') for dm in dms]}")
+        
+        return {"dms": dms}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error getting complete DM list: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get complete DM list: {str(e)}")
 
 @app.get("/api/rocket-chat/dm-list")
 async def get_dm_list(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -2359,7 +2453,10 @@ async def get_user_groups_endpoint(
                 # Check if the Rocket.Chat group still exists
                 group_check = await rocket_client.check_group_exists(group.rocket_chat_group_id, user_headers)
                 if not group_check.get("exists", False):
-                    print(f"⚠️ Group '{group.name}' (ID: {group.rocket_chat_group_id}) not found in Rocket.Chat, skipping")
+                    print(f"⚠️ Group '{group.name}' (ID: {group.rocket_chat_group_id}) not found in Rocket.Chat, removing from local database")
+                    # Remove the group from local database since it doesn't exist in Rocket.Chat
+                    db.delete(group)
+                    db.commit()
                     continue
             else:
                 # If no Rocket.Chat ID, try to find the group by name

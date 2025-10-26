@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { chatService, type ChatMessage, type ChatConversation } from '@/services/chat';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/AuthContext';
 
 // Helper function to format message timestamp
 const formatMessageTime = (timestamp: string) => {
@@ -48,9 +49,25 @@ const MessageComponent: React.FC<{
   const [showThreadInput, setShowThreadInput] = useState(false);
   const [threadMessage, setThreadMessage] = useState('');
   const [sendingThread, setSendingThread] = useState(false);
+  const { user } = useAuth();
   
   const isSystemMessage = message.type === 'system';
-  const isOwnMessage = message.user?.username === 'ankush1'; // Replace with actual current user
+  
+  // Simple: Use the isOwn flag from backend (it's already calculated correctly)
+  const isOwnMessage = message.isOwn === true;
+  
+  // Debug logging for message ownership
+  console.log('🔍 ChatWindow Message ownership check:', {
+    messageId: message.id,
+    messageUser: message.user?.username,
+    messageUserName: message.user?.name,
+    messageSender: message.sender,
+    currentUserEmail: user?.email,
+    isOwnFromBackend: message.isOwn,
+    isOwnMessage,
+    messageData: message
+  });
+  
   const hasThreadMessages = message.thread_messages && message.thread_messages.length > 0;
   const hasReactions = message.reactions && Object.keys(message.reactions).length > 0;
 
@@ -81,9 +98,9 @@ const MessageComponent: React.FC<{
               : 'bg-muted'
           }`}
         >
-          {!isSystemMessage && (
+          {!isSystemMessage && !isOwnMessage && (
             <div className="text-xs text-muted-foreground mb-1">
-              {message.user?.username || message.user?.name}
+              {message.user?.username || message.user?.name || message.sender}
             </div>
           )}
           <p className="text-sm">{message.text || message.content}</p>
@@ -160,9 +177,10 @@ const MessageComponent: React.FC<{
               placeholder="Reply to this message..."
               value={threadMessage}
               onChange={(e) => setThreadMessage(e.target.value)}
-              onKeyPress={(e) => {
+              onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
+                  e.stopPropagation();
                   handleSendThreadMessageLocal();
                 }
               }}
@@ -170,7 +188,11 @@ const MessageComponent: React.FC<{
               disabled={sendingThread}
             />
             <Button
-              onClick={handleSendThreadMessageLocal}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleSendThreadMessageLocal();
+              }}
               disabled={!threadMessage.trim() || sendingThread}
               size="sm"
             >
@@ -463,6 +485,23 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedChannel, isAuthenticate
       
       // Reload messages to show the new thread message
       await loadMessages();
+      
+      // Also reload thread messages for this specific parent message
+      try {
+        console.log('🔄 Reloading thread messages for parent:', parentMessageId);
+        const threadMessages = await chatService.getThreadMessages(parentMessageId);
+        console.log('📨 Thread messages received:', threadMessages);
+        setThreadMessages(prev => {
+          const updated = {
+            ...prev,
+            [parentMessageId]: threadMessages.messages || []
+          };
+          console.log('🔄 Updated thread messages state:', updated);
+          return updated;
+        });
+      } catch (error) {
+        console.error('Failed to reload thread messages:', error);
+      }
     } catch (error) {
       console.error('Failed to send thread message:', error);
       toast({

@@ -406,14 +406,20 @@ class RocketChatClient:
             return None
 
     async def get_channel_id_by_name(self, channel_name: str, channel_type: str = "channel", user_headers: Dict = None) -> Optional[str]:
-        """Get channel ID by name"""
+        """Get channel ID by name or ID"""
         try:
             # Use user-specific headers if provided, otherwise use default headers
             headers = user_headers if user_headers else self.headers
             
+            # Check if the input is already a Rocket.Chat ID (24 character hex string)
+            import re
+            if re.match(r'^[a-f0-9]{24}$', channel_name):
+                print(f"🔍 Input appears to be a Rocket.Chat ID: {channel_name}")
+                # If it's already an ID, return it directly
+                return channel_name
+            
             # Normalize group name for Rocket.Chat format
             if channel_type == "group":
-                import re
                 normalized_name = channel_name.lower().replace(' ', '-').replace('_', '-')
                 normalized_name = re.sub(r'[^a-z0-9-]', '', normalized_name)
                 normalized_name = normalized_name.strip('-')
@@ -1585,20 +1591,21 @@ class RocketChatClient:
                 print(f"DEBUG: Current user username: {current_username}")
                 
                 for im in ims:
-                    # Extract the other user's username from the usernames array
+                    # Simple: only include DMs with messages > 0
+                    msg_count = im.get('msgs', 0)
+                    if msg_count <= 0:
+                        continue
+                    
+                    # Simple: get the other user (take the second username to avoid current user)
                     usernames = im.get('usernames', [])
                     other_user = None
-                    
                     if len(usernames) >= 2:
-                        # Find the username that's not the current user
-                        for username in usernames:
-                            if username != current_username:
-                                other_user = username
-                                break
+                        other_user = usernames[1]  # Take the second username
+                    elif len(usernames) == 1:
+                        other_user = usernames[0]  # Fallback if only one username
                     
-                    # Fallback: if we can't determine the other user, use the first username
-                    if not other_user and usernames:
-                        other_user = usernames[0]
+                    if not other_user:
+                        continue
                     
                     room_data = {
                         'id': im.get('_id'),
@@ -1607,13 +1614,14 @@ class RocketChatClient:
                         'unread_count': im.get('unread', 0),
                         'type': 'direct_message',
                         'open': im.get('open', True),
-                        'other_user': other_user
+                        'other_user': other_user,
+                        'msgs': msg_count
                     }
                     
                     direct_messages.append(room_data)
-                    print(f"DEBUG: Added DM with other_user: {other_user} (usernames: {usernames})")
+                    print(f"DEBUG: Added DM: {other_user} (msgs: {msg_count})")
                 
-                print(f"DEBUG: Found {len(direct_messages)} DMs via im.list")
+                print(f"DEBUG: Found {len(direct_messages)} DMs with messages > 0")
                 return direct_messages
                 
         except Exception as e:
@@ -1636,6 +1644,11 @@ class RocketChatClient:
                         return username
                 
                 print(f"DEBUG: Failed to get current user username, using fallback")
+                # Try to extract username from X-User-Id header as fallback
+                user_id = headers.get('X-User-Id', '')
+                if user_id:
+                    # This is a fallback - we'll use the user ID to identify self-DMs
+                    return f"user_{user_id}"
                 return ''
                 
         except Exception as e:
