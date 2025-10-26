@@ -1049,8 +1049,271 @@ async def get_user_rooms(current_user: User = Depends(get_current_user), db: Ses
         print(f"Error getting user rooms: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get user rooms: {str(e)}")
 
+@app.get("/api/rocket-chat/test-rooms")
+async def test_rooms_api(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Test the rooms.get API to see what rooms the user is part of"""
+    try:
+        print(f"DEBUG: Testing rooms.get API for user: {current_user.email}")
+        
+        # Get user-specific headers for API calls
+        user_headers = await rocket_client.get_user_headers(
+            social_hub_user_email=current_user.email,
+            social_hub_user_name=current_user.full_name,
+            social_hub_user_id=str(current_user.id),
+            db_session=db
+        )
+        
+        # Test the rooms.get API
+        rooms_result = await rocket_client.get_rooms_list(user_headers)
+        
+        print(f"DEBUG: rooms.get result: {rooms_result}")
+        
+        return {
+            "success": True,
+            "user": current_user.email,
+            "rooms": rooms_result,
+            "message": "rooms.get API test completed"
+        }
+        
+    except Exception as e:
+        print(f"Error testing rooms API: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to test rooms API: {str(e)}")
+
+@app.get("/api/rocket-chat/find-group/{group_name}")
+async def find_group_by_name(group_name: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Find a group in Rocket.Chat by name and get its details"""
+    try:
+        print(f"DEBUG: Searching for group '{group_name}' for user: {current_user.email}")
+        
+        # Get user-specific headers for API calls
+        user_headers = await rocket_client.get_user_headers(
+            social_hub_user_email=current_user.email,
+            social_hub_user_name=current_user.full_name,
+            social_hub_user_id=str(current_user.id),
+            db_session=db
+        )
+        
+        # Search for group in Rocket.Chat
+        group_search = await rocket_client.find_group_by_name(group_name, user_headers)
+        
+        return {
+            "success": True,
+            "user": current_user.email,
+            "group_name": group_name,
+            "found_in_rocketchat": group_search.get("found", False),
+            "group_info": group_search.get("group"),
+            "group_id": group_search.get("id"),
+            "group_members": group_search.get("members", []),
+            "error": group_search.get("error") if not group_search.get("found") else None
+        }
+        
+    except Exception as e:
+        print(f"Error searching for group: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to search for group: {str(e)}")
+
+@app.post("/api/rocket-chat/sync-group/{group_id}")
+async def sync_group_with_rocketchat(group_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Sync a local group with its Rocket.Chat counterpart"""
+    try:
+        print(f"DEBUG: Syncing group {group_id} for user: {current_user.email}")
+        
+        # Get the group from local database
+        group = get_group_by_id(db, int(group_id))
+        if not group:
+            raise HTTPException(status_code=404, detail="Group not found in local database")
+        
+        # Convert group name to Rocket.Chat format
+        rocket_name = group.name.lower().replace('_', '-').replace(' ', '-')
+        import re
+        rocket_name = re.sub(r'[^a-z0-9-]', '', rocket_name)
+        rocket_name = rocket_name.strip('-')
+        
+        print(f"DEBUG: Searching for Rocket.Chat group: '{rocket_name}'")
+        
+        # Get user-specific headers for API calls
+        user_headers = await rocket_client.get_user_headers(
+            social_hub_user_email=current_user.email,
+            social_hub_user_name=current_user.full_name,
+            social_hub_user_id=str(current_user.id),
+            db_session=db
+        )
+        
+        # Search for group in Rocket.Chat
+        group_search = await rocket_client.find_group_by_name(rocket_name, user_headers)
+        
+        if group_search.get("found"):
+            # Update the group's Rocket.Chat ID in our database
+            new_rocket_id = group_search.get("id")
+            old_rocket_id = group.rocket_chat_group_id
+            group.rocket_chat_group_id = new_rocket_id
+            db.commit()
+            
+            return {
+                "success": True,
+                "message": f"Group '{group.name}' synced with Rocket.Chat",
+                "local_group_id": group.id,
+                "old_rocket_id": old_rocket_id,
+                "new_rocket_id": new_rocket_id,
+                "group_name": group.name,
+                "rocket_name": rocket_name,
+                "rocket_members": group_search.get("members", [])
+            }
+        else:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Group '{rocket_name}' not found in Rocket.Chat: {group_search.get('error', 'Unknown error')}"
+            )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error syncing group: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to sync group: {str(e)}")
+
+@app.post("/api/rocket-chat/recreate-group/{group_id}")
+async def recreate_group_in_rocketchat(group_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Recreate a group in Rocket.Chat that exists in local database but not in Rocket.Chat"""
+    try:
+        print(f"DEBUG: Recreating group {group_id} for user: {current_user.email}")
+        
+        # Get the group from local database
+        group = get_group_by_id(db, int(group_id))
+        if not group:
+            raise HTTPException(status_code=404, detail="Group not found in local database")
+        
+        # Get all members of the group
+        members = get_group_members(db, group.id)
+        member_usernames = []
+        
+        for member in members:
+            username = member.user.email.split('@')[0]
+            member_usernames.append(username)
+            print(f"DEBUG: Adding member: {member.user.full_name} ({username})")
+        
+        # Get user-specific headers for API calls
+        user_headers = await rocket_client.get_user_headers(
+            social_hub_user_email=current_user.email,
+            social_hub_user_name=current_user.full_name,
+            social_hub_user_id=str(current_user.id),
+            db_session=db
+        )
+        
+        # Recreate the group in Rocket.Chat
+        result = await rocket_client.recreate_group_in_rocketchat(
+            group_name=group.name,
+            members=member_usernames,
+            user_headers=user_headers
+        )
+        
+        if result.get('success'):
+            # Update the group's Rocket.Chat ID in our database
+            new_rocket_id = result.get('group_id')
+            group.rocket_chat_group_id = new_rocket_id
+            db.commit()
+            
+            return {
+                "success": True,
+                "message": f"Group '{group.name}' recreated successfully in Rocket.Chat",
+                "old_rocket_id": group_id,
+                "new_rocket_id": new_rocket_id,
+                "group_name": group.name,
+                "members": member_usernames
+            }
+        else:
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Failed to recreate group in Rocket.Chat: {result.get('error', 'Unknown error')}"
+            )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error recreating group: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to recreate group: {str(e)}")
+
+@app.get("/api/rocket-chat/check-group/{group_id}")
+async def check_group_exists(group_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Check if a group exists in Rocket.Chat and get its details"""
+    try:
+        print(f"DEBUG: Checking if group {group_id} exists for user: {current_user.email}")
+        
+        # Get user-specific headers for API calls
+        user_headers = await rocket_client.get_user_headers(
+            social_hub_user_email=current_user.email,
+            social_hub_user_name=current_user.full_name,
+            social_hub_user_id=str(current_user.id),
+            db_session=db
+        )
+        
+        # Check if group exists in Rocket.Chat
+        group_check = await rocket_client.check_group_exists(group_id, user_headers)
+        
+        # Check local database membership
+        user_groups = get_user_groups(db, current_user.id)
+        user_group_rocket_ids = {group.rocket_chat_group_id for group in user_groups if group.rocket_chat_group_id}
+        is_member_locally = group_id in user_group_rocket_ids
+        
+        return {
+            "success": True,
+            "user": current_user.email,
+            "group_id": group_id,
+            "exists_in_rocketchat": group_check.get("exists", False),
+            "group_info": group_check.get("group"),
+            "group_members": group_check.get("members", []),
+            "is_member_locally": is_member_locally,
+            "error": group_check.get("error") if not group_check.get("exists") else None
+        }
+        
+    except Exception as e:
+        print(f"Error checking group existence: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to check group existence: {str(e)}")
+
+@app.get("/api/rocket-chat/test-specific-group/{group_id}")
+async def test_specific_group(group_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Test if a specific group exists and if the user can access it"""
+    try:
+        print(f"DEBUG: Testing specific group {group_id} for user: {current_user.email}")
+        
+        # Get user-specific headers for API calls
+        user_headers = await rocket_client.get_user_headers(
+            social_hub_user_email=current_user.email,
+            social_hub_user_name=current_user.full_name,
+            social_hub_user_id=str(current_user.id),
+            db_session=db
+        )
+        
+        # Test the rooms.get API
+        rooms_result = await rocket_client.get_rooms_list(user_headers)
+        
+        # Check if the specific group is in the results
+        target_group = None
+        for group in rooms_result.get('groups', []):
+            if group.get('id') == group_id:
+                target_group = group
+                break
+        
+        # Check local database membership
+        user_groups = get_user_groups(db, current_user.id)
+        user_group_rocket_ids = {group.rocket_chat_group_id for group in user_groups if group.rocket_chat_group_id}
+        is_member_locally = group_id in user_group_rocket_ids
+        
+        return {
+            "success": True,
+            "user": current_user.email,
+            "group_id": group_id,
+            "group_found_in_rocketchat": target_group is not None,
+            "group_data": target_group,
+            "is_member_locally": is_member_locally,
+            "all_user_groups": list(user_group_rocket_ids),
+            "all_rocketchat_groups": [g.get('id') for g in rooms_result.get('groups', [])]
+        }
+        
+    except Exception as e:
+        print(f"Error testing specific group: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to test specific group: {str(e)}")
+
 @app.get("/api/rocket-chat/channels")
-async def get_all_channels(current_user: User = Depends(get_current_user)):
+async def get_all_channels(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Get all available channels and private groups"""
     try:
         print(f"DEBUG: Fetching all channels for user: {current_user.email}")
@@ -1077,6 +1340,37 @@ async def get_all_channels(current_user: User = Depends(get_current_user)):
             )
         
         rooms = await rocket_client.get_all_user_rooms()
+        
+        # Security fix: Filter groups to only show groups the user is actually a member of
+        # This prevents users from seeing groups they shouldn't have access to
+        if 'groups' in rooms and rooms['groups']:
+            print(f"DEBUG: Filtering {len(rooms['groups'])} groups by user membership")
+            
+            # Get user's group memberships from local database
+            user_groups = get_user_groups(db, current_user.id)
+            user_group_rocket_ids = {group.rocket_chat_group_id for group in user_groups if group.rocket_chat_group_id}
+            
+            print(f"DEBUG: User is member of {len(user_group_rocket_ids)} groups: {user_group_rocket_ids}")
+            print(f"DEBUG: Rocket.Chat returned {len(rooms['groups'])} groups: {[g.get('id') for g in rooms['groups']]}")
+            
+            # Special debug for ankush16 user
+            if current_user.email == "ankush16@gmail.com":
+                print(f"DEBUG: Special debug for ankush16 - should see group: 68fdfe8f5c7739709cadc576")
+                print(f"DEBUG: Rocket.Chat groups: {[g.get('id') for g in rooms['groups']]}")
+                print(f"DEBUG: User group memberships: {user_group_rocket_ids}")
+            
+            # Filter groups to only include those the user is a member of
+            filtered_groups = []
+            for group in rooms['groups']:
+                if group.get('id') in user_group_rocket_ids:
+                    filtered_groups.append(group)
+                    print(f"DEBUG: Including group: {group.get('name')} (ID: {group.get('id')})")
+                else:
+                    print(f"DEBUG: Excluding group: {group.get('name')} (ID: {group.get('id')}) - user not a member")
+            
+            rooms['groups'] = filtered_groups
+            print(f"DEBUG: Filtered groups count: {len(filtered_groups)}")
+        
         print(f"DEBUG: Returning rooms: {rooms}")
         return rooms
     except HTTPException:
@@ -1090,14 +1384,23 @@ async def get_channel_messages_by_id(
     channel_identifier: str,
     limit: int = 1000,
     channel_type: str = "channel",
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """Get messages from any channel or private group by ID or name"""
     try:
         print(f"DEBUG: Fetching messages for {channel_type}: {channel_identifier} (user: {current_user.email})")
         
+        # Get user-specific headers for API calls
+        user_headers = await rocket_client.get_user_headers(
+            social_hub_user_email=current_user.email,
+            social_hub_user_name=current_user.full_name,
+            social_hub_user_id=str(current_user.id),
+            db_session=db
+        )
+        
         # Get messages from the specified channel
-        messages = await rocket_client.get_channel_messages(channel_identifier, limit, channel_type)
+        messages = await rocket_client.get_channel_messages(channel_identifier, limit, channel_type, user_headers)
         print(f"DEBUG: Raw messages received: {len(messages) if messages else 0} messages")
         
         # Convert Rocket.Chat messages to frontend format
@@ -1845,6 +2148,19 @@ async def create_group_endpoint(
         # Create the group in our database with Rocket.Chat group ID
         rocket_group_id = rocket_group_result.get('group_id')
         group = create_group(db, group_data.dict(), current_user.id, rocket_group_id)
+        
+        # Add the creator to the Rocket.Chat group so they can see it in their subscriptions
+        creator_username = current_user.email.split('@')[0]
+        add_creator_result = await rocket_client.add_member_to_group(
+            group_id=rocket_group_id,
+            username=creator_username,
+            user_headers=user_headers
+        )
+        
+        if not add_creator_result.get('success'):
+            print(f"⚠️ Warning: Failed to add creator to Rocket.Chat group: {add_creator_result.get('error', 'Unknown error')}")
+        else:
+            print(f"✅ Successfully added creator '{creator_username}' to Rocket.Chat group")
         
         # Get group members for response
         members = get_group_members(db, group.id)

@@ -120,9 +120,9 @@ export const UserSearch: React.FC<UserSearchProps> = ({ onUserSelect, onClose })
                 >
                   <div className="flex items-center gap-3">
                     <Avatar className="h-10 w-10">
-                      {user.profile_picture ? (
+                      {user.profile_picture_url ? (
                         <img
-                          src={user.profile_picture}
+                          src={user.profile_picture_url}
                           alt={user.full_name}
                           className="h-10 w-10 rounded-full object-cover"
                         />
@@ -137,9 +137,6 @@ export const UserSearch: React.FC<UserSearchProps> = ({ onUserSelect, onClose })
                         {user.full_name}
                       </h3>
                       <p className="text-sm text-gray-500 truncate">
-                        @{user.username}
-                      </p>
-                      <p className="text-xs text-gray-400 truncate">
                         {user.email}
                       </p>
                     </div>

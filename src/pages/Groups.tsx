@@ -7,7 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Plus, Users, Search, Trash2, UserPlus, ArrowLeft } from 'lucide-react';
+import { Plus, Users, Search, Trash2, UserPlus, ArrowLeft, MessageCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useNavigate } from 'react-router-dom';
 
@@ -108,6 +108,18 @@ const Groups: React.FC = () => {
         toast({
           title: "Success",
           description: "Group created successfully",
+        });
+        
+        // Navigate to Messages page with the newly created group
+        navigate('/messages', { 
+          state: { 
+            openGroup: {
+              id: data.id,
+              name: data.name,
+              rocket_chat_group_id: data.rocket_chat_group_id || `group-${data.id}`,
+              type: 'private_group'
+            }
+          } 
         });
       } else {
         const error = await response.json();
@@ -264,6 +276,20 @@ const Groups: React.FC = () => {
     }
   };
 
+  const openGroupChat = (group: any) => {
+    // Navigate to Messages page with the group selected
+    navigate('/messages', { 
+      state: { 
+        openGroup: {
+          id: group.id,
+          name: group.name,
+          rocket_chat_group_id: group.rocket_chat_group_id || `group-${group.id}`,
+          type: 'private_group'
+        }
+      } 
+    });
+  };
+
   if (loading) {
     return (
       <div className="container mx-auto p-6">
@@ -393,6 +419,14 @@ const Groups: React.FC = () => {
                   </div>
                   
                   <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() => openGroupChat(group)}
+                      className="bg-blue-600 hover:bg-blue-700 text-white"
+                    >
+                      <MessageCircle className="w-4 h-4 mr-1" />
+                      Chat
+                    </Button>
                     <Button
                       size="sm"
                       variant="outline"

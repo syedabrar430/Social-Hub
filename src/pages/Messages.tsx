@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import EnhancedMessagesWidget from '@/components/chat/EnhancedMessagesWidget';
 import RocketChatIframe from '@/components/chat/RocketChatIframe';
 import RocketChatPopup from '@/components/chat/RocketChatPopup';
@@ -6,6 +7,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 const Messages: React.FC = () => {
   const [activeTab, setActiveTab] = useState('custom');
+  const location = useLocation();
+  
+  // Get the group to open from navigation state
+  const openGroup = location.state?.openGroup;
 
   return (
     <div className="h-full">
@@ -16,7 +21,7 @@ const Messages: React.FC = () => {
         </TabsList>
         
         <TabsContent value="custom" className="h-[calc(100%-4rem)]">
-          <EnhancedMessagesWidget />
+          <EnhancedMessagesWidget openGroup={openGroup} />
         </TabsContent>
         
         <TabsContent value="rocketchat" className="h-[calc(100%-4rem)]">

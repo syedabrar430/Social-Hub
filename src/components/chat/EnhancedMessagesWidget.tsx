@@ -34,7 +34,16 @@ const formatMessageTime = (timestamp: string) => {
   }
 };
 
-const EnhancedMessagesWidget = () => {
+interface EnhancedMessagesWidgetProps {
+  openGroup?: {
+    id: number;
+    name: string;
+    rocket_chat_group_id?: string;
+    type: string;
+  };
+}
+
+const EnhancedMessagesWidget: React.FC<EnhancedMessagesWidgetProps> = ({ openGroup }) => {
   console.log('🎯 EnhancedMessagesWidget component is rendering');
   
   // Tab navigation state
@@ -142,12 +151,12 @@ const EnhancedMessagesWidget = () => {
 
   // Load conversations when component mounts
   useEffect(() => {
-    console.log('🔍 EnhancedMessagesWidget useEffect - isAuthenticated:', isAuthenticated, 'isInitialized:', isInitialized);
+    console.log('🔍 EnhancedMessagesWidget useEffect - isAuthenticated:', isAuthenticated, 'isInitialized:', isInitialized, 'openGroup:', openGroup);
     if (isAuthenticated && !isInitialized) {
       console.log('🔄 Starting to load channels and DMs...');
       loadChannelsAndDMs();
     }
-  }, [isAuthenticated, isInitialized]);
+  }, [isAuthenticated, isInitialized, openGroup]);
 
 
   // Filter DMs based on messages
@@ -197,12 +206,42 @@ const EnhancedMessagesWidget = () => {
       
       // Combine all conversations and try to restore selected conversation
       const allConversations = [...channelsData, ...groupsData, ...dmsData];
-      const restoredConversation = restoreSelectedConversation(allConversations);
       
-      // If we restored a conversation, load its messages
-      if (restoredConversation) {
-        console.log('🔄 Loading messages for restored conversation:', restoredConversation);
-        await handleConversationSelect(restoredConversation);
+      // Check if we need to open a specific group from navigation
+      let conversationToSelect = null;
+      
+      if (openGroup) {
+        console.log('🎯 Looking for openGroup:', openGroup);
+        // Find the group in the loaded conversations
+        conversationToSelect = allConversations.find(conv => 
+          conv.type === 'private_group' && 
+          (conv.id === openGroup.id.toString() || conv.name === openGroup.name)
+        );
+        
+        if (conversationToSelect) {
+          console.log('✅ Found group to open:', conversationToSelect);
+        } else {
+          console.log('⚠️ Group not found in conversations, creating temporary conversation');
+          // Create a temporary conversation for the new group
+          conversationToSelect = {
+            id: openGroup.id.toString(),
+            name: openGroup.name,
+            display_name: openGroup.name,
+            type: 'private_group' as const,
+            unread_count: 0,
+            last_message: null,
+            last_message_time: null
+          };
+        }
+      } else {
+        // Try to restore selected conversation from localStorage
+        conversationToSelect = restoreSelectedConversation(allConversations);
+      }
+      
+      // If we have a conversation to select, load its messages
+      if (conversationToSelect) {
+        console.log('🔄 Loading messages for selected conversation:', conversationToSelect);
+        await handleConversationSelect(conversationToSelect);
       }
       
       setIsInitialized(true);
@@ -474,6 +513,18 @@ const EnhancedMessagesWidget = () => {
       
       // Clear selected files after successful upload/send
       setSelectedFiles([]);
+      
+      // If this was a DM, refresh the DM list to ensure it appears in the DM section
+      if (selectedConversation.type === 'direct_message') {
+        console.log('🔄 Refreshing DM list after sending message...');
+        try {
+          const refreshedDMs = await rocketChatService.getDirectMessagesWithMessages();
+          console.log('💬 Refreshed DMs:', refreshedDMs);
+          setDirectMessages(refreshedDMs);
+        } catch (error) {
+          console.error('Failed to refresh DM list:', error);
+        }
+      }
     } catch (error) {
       console.error('Failed to send message:', error);
       console.error('Error details:', error);
@@ -615,13 +666,16 @@ const EnhancedMessagesWidget = () => {
     console.log('Selected user for DM:', selectedUser);
     
     try {
+      // Derive username from email (before @ symbol)
+      const username = selectedUser.email.split('@')[0];
+      
       // Create a new DM conversation with the selected user
       const newDMConversation: ChatConversation = {
         id: `dm-${selectedUser.id}`,
-        name: selectedUser.rocket_chat_username || selectedUser.username,
+        name: username, // Use the derived username
         display_name: selectedUser.full_name,
         type: 'direct_message',  // Use 'direct_message' to match the message sending logic
-        other_user: selectedUser.username,
+        other_user: selectedUser.full_name, // Use full name to match backend format
         unread_count: 0,
         last_message: null,
         last_message_time: null
@@ -629,12 +683,12 @@ const EnhancedMessagesWidget = () => {
       
       // Add to DMs list if not already present
       setDirectMessages(prev => {
-        const exists = prev.some(dm => dm.other_user === selectedUser.username);
+        const exists = prev.some(dm => dm.other_user === selectedUser.full_name);
         if (!exists) {
           console.log('Adding new DM conversation:', newDMConversation);
           return [newDMConversation, ...prev];
         }
-        console.log('DM conversation already exists for user:', selectedUser.username);
+        console.log('DM conversation already exists for user:', selectedUser.full_name);
         return prev;
       });
       
@@ -701,7 +755,8 @@ const EnhancedMessagesWidget = () => {
     filteredDMs: filteredDMs.length,
     conversations: conversations.length,
     filteredConversations: filteredConversations.length,
-    searchQuery
+    searchQuery,
+    groupsData: groups.map(g => ({ id: g.id, name: g.name, type: g.type, display_name: g.display_name }))
   });
   
   // Debug the actual conversations array
@@ -918,12 +973,12 @@ const EnhancedMessagesWidget = () => {
                           key={conversation.id}
                           className={`p-3 rounded-lg border hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors ${
                             isSelected ? 'bg-primary/10 border-primary' : ''
-                          } ${isDM ? 'bg-green-50 border-green-200' : ''}`}
+                          } ${isDM ? 'bg-green-50 border-green-200' : ''} ${isGroup ? 'bg-purple-50 border-purple-200' : ''}`}
                           onClick={() => handleConversationSelect(conversation)}
                           style={{
-                            backgroundColor: isDM ? '#f0fdf4' : undefined,
-                            borderColor: isDM ? '#bbf7d0' : undefined,
-                            borderWidth: isDM ? '2px' : undefined
+                            backgroundColor: isDM ? '#f0fdf4' : isGroup ? '#faf5ff' : undefined,
+                            borderColor: isDM ? '#bbf7d0' : isGroup ? '#d8b4fe' : undefined,
+                            borderWidth: (isDM || isGroup) ? '2px' : undefined
                           }}
                         >
                           <div className="flex items-center justify-between">
@@ -933,8 +988,10 @@ const EnhancedMessagesWidget = () => {
                               }`}></div>
                               <div>
                                 <div className="font-medium text-sm">
-                                  {isDM ? (conversation.name || conversation.other_user) : (conversation.display_name || conversation.name || conversation.other_user)}
+                                  {isDM ? conversation.name : (conversation.display_name || conversation.name || conversation.other_user)}
                                   {isDM && <span className="ml-2 text-xs bg-green-100 text-green-800 px-2 py-1 rounded">DM</span>}
+                                  {isGroup && <span className="ml-2 text-xs bg-purple-100 text-purple-800 px-2 py-1 rounded">Group</span>}
+                                  {isChannel && <span className="ml-2 text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">Channel</span>}
                                 </div>
                                 {conversation.description && (
                                   <div className="text-xs text-gray-500 truncate">
@@ -974,7 +1031,7 @@ const EnhancedMessagesWidget = () => {
                       <div>
                         <h2 className="font-semibold">
                           {selectedConversation.type === 'direct_message' 
-                            ? (selectedConversation.name || selectedConversation.other_user)
+                            ? selectedConversation.name
                             : (selectedConversation.display_name || selectedConversation.name || selectedConversation.other_user)
                           }
                         </h2>
@@ -1479,7 +1536,7 @@ const EnhancedMessagesWidget = () => {
                       <Input
                         placeholder={`Message ${
                           selectedConversation.type === 'direct_message' 
-                            ? (selectedConversation.name || selectedConversation.other_user)
+                            ? selectedConversation.name
                             : (selectedConversation.display_name || selectedConversation.name || selectedConversation.other_user)
                         }...`}
                         value={newMessage}

@@ -641,13 +641,19 @@ class RocketChatClient:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    async def get_channel_messages(self, channel_identifier: str, count: int = 50, channel_type: str = "channel") -> List[Dict]:
+    async def get_channel_messages(self, channel_identifier: str, count: int = 50, channel_type: str = "channel", user_headers: Dict = None) -> List[Dict]:
         """Get messages from a channel with pagination to fetch all messages"""
         try:
-            if not await self.ensure_authenticated():
-                return []
+            # Use user-specific headers if provided, otherwise use admin headers
+            headers = user_headers if user_headers else self.headers
+            if user_headers:
+                print("✅ Using user-specific headers for message retrieval")
+            else:
+                if not await self.ensure_authenticated():
+                    return []
+                print("⚠️ Using admin headers for message retrieval (fallback)")
             
-            room_id = await self.get_channel_id_by_name(channel_identifier, channel_type)
+            room_id = await self.get_channel_id_by_name(channel_identifier, channel_type, user_headers)
             if not room_id:
                 return []
             
@@ -655,11 +661,15 @@ class RocketChatClient:
             offset = 0
             batch_size = 100  # Fetch in batches of 100
             
+            # Choose the correct API endpoint based on channel type
+            api_endpoint = "/api/v1/groups.messages" if channel_type == "group" else "/api/v1/channels.messages"
+            print(f"DEBUG: Using API endpoint {api_endpoint} for {channel_type}: {channel_identifier} (room_id: {room_id})")
+            
             async with httpx.AsyncClient(timeout=60.0) as client:
                 while True:
                     response = await client.get(
-                        f"{self.base_url}/api/v1/channels.messages",
-                        headers=self.headers,
+                        f"{self.base_url}{api_endpoint}",
+                        headers=headers,
                         params={
                             "roomId": room_id,
                             "count": batch_size,
@@ -1292,68 +1302,271 @@ class RocketChatClient:
             print(f"Exception getting all conversations: {e}")
             return []
 
-    async def get_all_user_rooms(self, user_headers: Dict = None) -> Dict:
-        """Get all channels, groups, and DMs that the user is part of"""
+    async def recreate_group_in_rocketchat(self, group_name: str, members: List[str], user_headers: Dict = None) -> Dict:
+        """Recreate a group in Rocket.Chat with the specified members"""
         try:
-            print("🔍 Fetching real Rocket.Chat rooms data")
+            print(f"🔧 Recreating group '{group_name}' in Rocket.Chat with members: {members}")
             
-            # Use user-specific headers if provided, otherwise use admin headers (for backward compatibility)
+            if not user_headers:
+                print("❌ User headers required for creating groups")
+                return {"success": False, "error": "User authentication required"}
+            
+            # Convert group name to valid Rocket.Chat format
+            valid_name = group_name.lower().replace(' ', '-').replace('_', '-')
+            import re
+            valid_name = re.sub(r'[^a-z0-9-]', '', valid_name)
+            valid_name = valid_name.strip('-')
+            
+            group_data = {
+                "name": valid_name,
+                "type": "p",  # Private group
+                "members": members
+            }
+            
+            print(f"🔧 Creating group '{valid_name}' with members: {members}")
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{self.base_url}/api/v1/groups.create",
+                    headers=user_headers,
+                    json=group_data
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get('success'):
+                        group_id = result.get('group', {}).get('_id')
+                        print(f"✅ Successfully recreated group '{group_name}' with ID: {group_id}")
+                        return {
+                            "success": True,
+                            "group_id": group_id,
+                            "group": result.get('group', {}),
+                            "new_name": valid_name
+                        }
+                    else:
+                        error_msg = result.get('error', 'Unknown error')
+                        print(f"❌ Failed to recreate group: {error_msg}")
+                        return {"success": False, "error": error_msg}
+                else:
+                    print(f"❌ Failed to recreate group - HTTP {response.status_code}: {response.text}")
+                    return {"success": False, "error": f"HTTP {response.status_code}: {response.text}"}
+                    
+        except Exception as e:
+            print(f"Exception recreating group: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def find_group_by_name(self, group_name: str, user_headers: Dict = None) -> Dict:
+        """Find a group in Rocket.Chat by name"""
+        try:
+            print(f"🔍 Searching for group '{group_name}' in Rocket.Chat")
+            
+            # Use user-specific headers if provided, otherwise use admin headers
             headers = user_headers if user_headers else self.headers
-            if user_headers:
-                print("✅ Using user-specific headers for rooms")
-            else:
-                print("⚠️ Using admin headers for rooms (fallback)")
             
             async with httpx.AsyncClient(timeout=10.0) as client:
-                # Get user subscriptions (channels, groups, DMs)
-                response = await client.get(f"{self.base_url}/api/v1/subscriptions.get", headers=headers)
+                # Try to get group info using groups.info API with roomName parameter
+                response = await client.get(
+                    f"{self.base_url}/api/v1/groups.info",
+                    headers=headers,
+                    params={"roomName": group_name}
+                )
+                
+                print(f"DEBUG: groups.info API response status: {response.status_code}")
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get('success'):
+                        group_info = result.get('group', {})
+                        print(f"✅ Found group '{group_name}' in Rocket.Chat: {group_info.get('_id', 'Unknown ID')}")
+                        return {
+                            "found": True,
+                            "group": group_info,
+                            "id": group_info.get('_id'),
+                            "name": group_info.get('name'),
+                            "members": group_info.get('usernames', [])
+                        }
+                    else:
+                        print(f"❌ Group '{group_name}' not found: {result.get('error', 'Unknown error')}")
+                        return {"found": False, "error": result.get('error', 'Unknown error')}
+                else:
+                    print(f"❌ Failed to search group - HTTP {response.status_code}: {response.text}")
+                    return {"found": False, "error": f"HTTP {response.status_code}"}
+                    
+        except Exception as e:
+            print(f"Exception searching for group: {e}")
+            return {"found": False, "error": str(e)}
+
+    async def check_group_exists(self, group_id: str, user_headers: Dict = None) -> Dict:
+        """Check if a group exists in Rocket.Chat and get its details"""
+        try:
+            print(f"🔍 Checking if group {group_id} exists in Rocket.Chat")
+            
+            # Use user-specific headers if provided, otherwise use admin headers
+            headers = user_headers if user_headers else self.headers
+            
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                # Try to get group info using groups.info API
+                response = await client.get(
+                    f"{self.base_url}/api/v1/groups.info",
+                    headers=headers,
+                    params={"roomId": group_id}
+                )
+                
+                print(f"DEBUG: groups.info API response status: {response.status_code}")
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get('success'):
+                        group_info = result.get('group', {})
+                        print(f"✅ Group {group_id} exists in Rocket.Chat: {group_info.get('name', 'Unknown')}")
+                        return {
+                            "exists": True,
+                            "group": group_info,
+                            "name": group_info.get('name'),
+                            "members": group_info.get('usernames', [])
+                        }
+                    else:
+                        print(f"❌ Group {group_id} not found: {result.get('error', 'Unknown error')}")
+                        return {"exists": False, "error": result.get('error', 'Unknown error')}
+                else:
+                    print(f"❌ Failed to check group - HTTP {response.status_code}: {response.text}")
+                    return {"exists": False, "error": f"HTTP {response.status_code}"}
+                    
+        except Exception as e:
+            print(f"Exception checking group existence: {e}")
+            return {"exists": False, "error": str(e)}
+
+    async def get_rooms_list(self, user_headers: Dict = None) -> Dict:
+        """Get all rooms (channels, groups, DMs) that the user is part of using rooms.get API"""
+        try:
+            print("🔍 Fetching rooms using rooms.get API")
+            
+            # Use user-specific headers if provided, otherwise use admin headers
+            headers = user_headers if user_headers else self.headers
+            if user_headers:
+                print("✅ Using user-specific headers for rooms.get")
+            else:
+                print("⚠️ Using admin headers for rooms.get (fallback)")
+            
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(f"{self.base_url}/api/v1/rooms.get", headers=headers)
+                
+                print(f"DEBUG: rooms.get API response status: {response.status_code}")
                 
                 if response.status_code != 200:
-                    print(f"❌ Failed to get subscriptions: HTTP {response.status_code}")
+                    print(f"❌ Failed to get rooms list: HTTP {response.status_code}")
+                    print(f"DEBUG: Error response: {response.text}")
                     return {'channels': [], 'groups': [], 'direct_messages': []}
                 
-                subscriptions = response.json()
-                if not subscriptions.get('success'):
-                    print(f"❌ API error: {subscriptions.get('error', 'Unknown error')}")
+                result = response.json()
+                print(f"DEBUG: rooms.get API response: {result}")
+                
+                if not result.get('success'):
+                    print(f"❌ API error: {result.get('error', 'Unknown error')}")
                     return {'channels': [], 'groups': [], 'direct_messages': []}
                 
-                # Parse the subscriptions
+                rooms = result.get('update', [])
+                print(f"DEBUG: Found {len(rooms)} rooms via rooms.get")
+                
+                # Parse the rooms by type
                 channels = []
                 groups = []
                 direct_messages = []
                 
-                for sub in subscriptions.get('update', []):
+                for room in rooms:
                     room_data = {
-                        'id': sub.get('rid'),
-                        'name': sub.get('name'),
-                        'display_name': sub.get('fname', sub.get('name')),
-                        'unread_count': sub.get('unread', 0),
-                        'type': sub.get('t'),
-                        'open': sub.get('open', True)
+                        'id': room.get('_id'),
+                        'name': room.get('name'),
+                        'display_name': room.get('fname', room.get('name')),
+                        'unread_count': room.get('unread', 0),
+                        'type': room.get('t'),
+                        'open': room.get('open', True)
                     }
                     
-                    if sub.get('t') == 'c':  # Channel
-                        room_data['type'] = 'channel'  # Convert 'c' to full type name
+                    if room.get('t') == 'c':  # Channel
+                        room_data['type'] = 'channel'
                         channels.append(room_data)
-                    elif sub.get('t') == 'p':  # Private group
-                        room_data['type'] = 'private_group'  # Convert 'p' to full type name
+                    elif room.get('t') == 'p':  # Private group
+                        room_data['type'] = 'private_group'
                         groups.append(room_data)
-                    elif sub.get('t') == 'd':  # Direct message
-                        room_data['other_user'] = sub.get('fname', sub.get('name'))
-                        room_data['type'] = 'direct_message'  # Convert 'd' to full type name
+                    elif room.get('t') == 'd':  # Direct message
+                        room_data['other_user'] = room.get('fname', room.get('name'))
+                        room_data['type'] = 'direct_message'
                         direct_messages.append(room_data)
                 
-                rooms = {
+                print(f"DEBUG: Parsed rooms - Channels: {len(channels)}, Groups: {len(groups)}, DMs: {len(direct_messages)}")
+                
+                return {
                     'channels': channels,
                     'groups': groups,
                     'direct_messages': direct_messages
                 }
                 
-                print(f"✅ Fetched real rooms: {len(channels)} channels, {len(groups)} groups, {len(direct_messages)} DMs")
-                return rooms
-                        
         except Exception as e:
-            print(f"Exception getting user rooms: {e}")
+            print(f"Exception getting rooms list: {e}")
+            return {'channels': [], 'groups': [], 'direct_messages': []}
+
+    async def get_groups_list(self, user_headers: Dict = None) -> List[Dict]:
+        """Get list of private groups that the user is part of using groups.list API"""
+        try:
+            print("🔍 Fetching groups using groups.list API")
+            
+            # Use user-specific headers if provided, otherwise use admin headers
+            headers = user_headers if user_headers else self.headers
+            if user_headers:
+                print("✅ Using user-specific headers for groups.list")
+            else:
+                print("⚠️ Using admin headers for groups.list (fallback)")
+            
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(f"{self.base_url}/api/v1/groups.list", headers=headers)
+                
+                print(f"DEBUG: groups.list API response status: {response.status_code}")
+                
+                if response.status_code != 200:
+                    print(f"❌ Failed to get groups list: HTTP {response.status_code}")
+                    print(f"DEBUG: Error response: {response.text}")
+                    return []
+                
+                result = response.json()
+                print(f"DEBUG: groups.list API response: {result}")
+                
+                if not result.get('success'):
+                    print(f"❌ API error: {result.get('error', 'Unknown error')}")
+                    return []
+                
+                groups = result.get('groups', [])
+                print(f"DEBUG: Found {len(groups)} groups via groups.list")
+                
+                # Convert to our format
+                formatted_groups = []
+                for group in groups:
+                    formatted_group = {
+                        'id': group.get('_id'),
+                        'name': group.get('name'),
+                        'display_name': group.get('fname', group.get('name')),
+                        'unread_count': 0,  # groups.list doesn't provide unread count
+                        'type': 'private_group',
+                        'open': True
+                    }
+                    formatted_groups.append(formatted_group)
+                
+                return formatted_groups
+                
+        except Exception as e:
+            print(f"Exception getting groups list: {e}")
+            return []
+
+    async def get_all_user_rooms(self, user_headers: Dict = None) -> Dict:
+        """Get all channels, groups, and DMs that the user is part of using rooms.get API"""
+        try:
+            print("🔍 Fetching real Rocket.Chat rooms data using rooms.get API")
+            
+            # Use the new rooms.get API for better accuracy
+            return await self.get_rooms_list(user_headers)
+                
+        except Exception as e:
+            print(f"Exception getting all conversations: {e}")
             return {'channels': [], 'groups': [], 'direct_messages': []}
 
 # Create global instance

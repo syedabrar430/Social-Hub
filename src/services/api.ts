@@ -232,17 +232,16 @@ class ApiService {
     console.log('🔍 API Service: Searching users with query:', query);
     console.log('🔍 API Service: Access token available:', !!localStorage.getItem('access_token'));
     console.log('🔍 API Service: Token value:', localStorage.getItem('access_token')?.substring(0, 20) + '...');
-    return this.request<{ users: UserSearchResult[]; count: number }>(`/api/users/search?query=${encodeURIComponent(query)}`);
+    const users = await this.request<UserSearchResult[]>(`/users/search?query=${encodeURIComponent(query)}`);
+    return { users, count: users.length };
   }
 }
 
 export interface UserSearchResult {
-  id: string;
-  username: string;
+  id: number;
   full_name: string;
   email: string;
-  profile_picture?: string;
-  rocket_chat_username?: string;
+  profile_picture_url?: string;
 }
 
 export const apiService = new ApiService();
