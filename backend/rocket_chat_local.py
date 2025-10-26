@@ -103,9 +103,10 @@ class RocketChatClient:
             
             # Fallback to generating credentials if not found in database
             if not username or not password:
-                username = social_hub_user_email.split('@')[0]
+                username = f"{social_hub_user_email.split('@')[0]}_{social_hub_user_id}"
                 # Special case for test user
-                if username == "test" and social_hub_user_email == "test@example.com":
+                if username == "test_1" and social_hub_user_email == "test@example.com":
+                    username = "test"
                     password = "testpassword"
                     print(f"🔐 Using test user credentials: {username}")
                 else:
@@ -152,10 +153,10 @@ class RocketChatClient:
         """Authenticate a user with their Social Hub credentials"""
         try:
             # Generate username and password based on Social Hub data
-            username = email.split('@')[0]  # Use email prefix as username
+            username = f"{email.split('@')[0]}_{user_id}"  # Use email prefix + user ID as username
             
             # Use actual password for known users, otherwise generate one
-            if username == "ankush8":
+            if username == "ankush8_8":  # Updated to match new username format
                 password = "Ankushsocial@2"
             else:
                 password = f"socialhub_{user_id}"
@@ -232,7 +233,7 @@ class RocketChatClient:
         """Create a new user in Rocket.Chat and authenticate them"""
         try:
             # Try to create user without admin authentication first
-            username = email.split('@')[0]  # Use email prefix as username
+            username = f"{email.split('@')[0]}_{user_id}"  # Use email prefix + user ID as username
             password = f"socialhub_{user_id}"
             
             user_data = {
@@ -279,7 +280,7 @@ class RocketChatClient:
             if not admin_auth:
                 return None
             
-            username = email.split('@')[0]  # Use email prefix as username
+            username = f"{email.split('@')[0]}_{user_id}"  # Use email prefix + user ID as username
             password = f"socialhub_{user_id}"
             
             user_data = {
@@ -410,18 +411,28 @@ class RocketChatClient:
             # Use user-specific headers if provided, otherwise use default headers
             headers = user_headers if user_headers else self.headers
             
+            # Normalize group name for Rocket.Chat format
+            if channel_type == "group":
+                import re
+                normalized_name = channel_name.lower().replace(' ', '-').replace('_', '-')
+                normalized_name = re.sub(r'[^a-z0-9-]', '', normalized_name)
+                normalized_name = normalized_name.strip('-')
+                print(f"🔍 Looking for group with normalized name: {normalized_name}")
+            else:
+                normalized_name = channel_name
+            
             async with httpx.AsyncClient(timeout=30.0) as client:
                 if channel_type == "channel":
                     response = await client.get(
                         f"{self.base_url}/api/v1/channels.info",
                         headers=headers,
-                        params={"roomName": channel_name}
+                        params={"roomName": normalized_name}
                     )
                 else:
                     response = await client.get(
                         f"{self.base_url}/api/v1/groups.info",
                         headers=headers,
-                        params={"roomName": channel_name}
+                        params={"roomName": normalized_name}
                     )
                 
                 if response.status_code == 200:
@@ -429,17 +440,17 @@ class RocketChatClient:
                     if result.get('success'):
                         channel_id = result.get('channel', {}).get('_id') or result.get('group', {}).get('_id')
                         if channel_id:
-                            print(f"✅ Found channel '{channel_name}' with ID: {channel_id}")
+                            print(f"✅ Found {channel_type} '{normalized_name}' with ID: {channel_id}")
                         return channel_id
                     else:
-                        print(f"❌ Channel '{channel_name}' not found: {result.get('error', 'Unknown error')}")
+                        print(f"❌ {channel_type.title()} '{normalized_name}' not found: {result.get('error', 'Unknown error')}")
                         return None
                 else:
-                    print(f"❌ Failed to get channel info - HTTP {response.status_code}: {response.text}")
+                    print(f"❌ Failed to get {channel_type} info - HTTP {response.status_code}: {response.text}")
                     return None
                     
         except Exception as e:
-            print(f"Exception getting channel ID: {e}")
+            print(f"Exception getting {channel_type} ID: {e}")
             return None
 
     async def create_private_group(self, group_name: str, members: List[str] = None, user_headers: Dict = None) -> Dict:
@@ -629,14 +640,22 @@ class RocketChatClient:
                     headers=headers
                 )
                 
+                print(f"DEBUG: Rocket.Chat postMessage response status: {response.status_code}")
+                print(f"DEBUG: Rocket.Chat postMessage response text: {response.text}")
+                
                 if response.status_code == 200:
                     result = response.json()
+                    print(f"DEBUG: Rocket.Chat response: {result}")
                     if result.get('success'):
                         return {"success": True, "message": result.get('message')}
                     else:
-                        return {"success": False, "error": result.get('error', 'Unknown error')}
+                        error_msg = result.get('error', 'Unknown error')
+                        print(f"❌ Rocket.Chat error: '{error_msg}' (type: {type(error_msg)})")
+                        return {"success": False, "error": error_msg}
                 else:
-                    return {"success": False, "error": f"HTTP {response.status_code}: {response.text}"}
+                    error_text = response.text
+                    print(f"❌ Rocket.Chat HTTP error {response.status_code}: {error_text}")
+                    return {"success": False, "error": f"HTTP {response.status_code}: {error_text}"}
                     
         except Exception as e:
             return {"success": False, "error": str(e)}
@@ -929,21 +948,36 @@ class RocketChatClient:
     async def send_thread_message(self, channel_name: str, parent_message_id: str, text: str, user_headers: Dict = None) -> Dict:
         """Send a message to a thread"""
         try:
+            print(f"DEBUG: send_thread_message called with channel_name: {channel_name}, parent_message_id: {parent_message_id}, text: {text}")
+            
             # Use user-specific headers if provided, otherwise use default headers
             headers = user_headers if user_headers else self.headers
             
             if not await self.ensure_authenticated():
                 return {"success": False, "error": "Authentication failed"}
             
-            channel_id = await self.get_or_create_channel(channel_name, user_headers)
+            # For thread messages, we need to determine if it's a channel or group
+            # Try group first (most common for private groups), then channel
+            print(f"DEBUG: Looking for group with name: {channel_name}")
+            channel_id = await self.get_channel_id_by_name(channel_name, "group", user_headers)
             if not channel_id:
-                return {"success": False, "error": f"Channel '{channel_name}' not found"}
+                print(f"DEBUG: Group not found, trying channel with name: {channel_name}")
+                channel_id = await self.get_channel_id_by_name(channel_name, "channel", user_headers)
+            
+            if not channel_id:
+                print(f"DEBUG: Neither group nor channel found for: {channel_name}")
+                return {"success": False, "error": f"Channel/Group '{channel_name}' not found"}
+            
+            print(f"DEBUG: Found channel/group ID: {channel_id}")
             
             message_data = {
                 "roomId": channel_id,
                 "text": text,
-                "tmid": parent_message_id
+                "tmid": parent_message_id,
+                "tshow": True  # Show thread message in main channel as well
             }
+            
+            print(f"DEBUG: Sending thread message with data: {message_data}")
             
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(
@@ -952,16 +986,25 @@ class RocketChatClient:
                     headers=headers
                 )
                 
+                print(f"DEBUG: Rocket.Chat response status: {response.status_code}")
+                print(f"DEBUG: Rocket.Chat response text: {response.text}")
+                
                 if response.status_code == 200:
                     result = response.json()
+                    print(f"DEBUG: Rocket.Chat result: {result}")
                     if result.get('success'):
                         return {"success": True, "message": result.get('message')}
                     else:
-                        return {"success": False, "error": result.get('error', 'Unknown error')}
+                        error_msg = result.get('error', 'Unknown error')
+                        print(f"❌ Rocket.Chat error: {error_msg}")
+                        return {"success": False, "error": error_msg}
                 else:
-                    return {"success": False, "error": f"HTTP {response.status_code}: {response.text}"}
+                    error_text = response.text
+                    print(f"❌ Rocket.Chat HTTP error {response.status_code}: {error_text}")
+                    return {"success": False, "error": f"HTTP {response.status_code}: {error_text}"}
                     
         except Exception as e:
+            print(f"Exception in send_thread_message: {e}")
             return {"success": False, "error": str(e)}
 
     async def generate_sso_url(self, user_email: str, user_name: str, user_id: str) -> dict:
@@ -1437,41 +1480,53 @@ class RocketChatClient:
             return {"exists": False, "error": str(e)}
 
     async def get_rooms_list(self, user_headers: Dict = None) -> Dict:
-        """Get all rooms (channels, groups, DMs) that the user is part of using rooms.get API"""
+        """Get all rooms (channels, groups, DMs) that the user is part of"""
         try:
-            print("🔍 Fetching rooms using rooms.get API")
+            print("🔍 Fetching rooms using rooms.get API for channels/groups and im.list for DMs")
             
             # Use user-specific headers if provided, otherwise use admin headers
             headers = user_headers if user_headers else self.headers
             if user_headers:
-                print("✅ Using user-specific headers for rooms.get")
+                print("✅ Using user-specific headers")
             else:
-                print("⚠️ Using admin headers for rooms.get (fallback)")
+                print("⚠️ Using admin headers (fallback)")
             
+            # Get channels and groups using rooms.get API
+            channels, groups = await self.get_channels_and_groups(headers)
+            
+            # Get DMs using im.list API for better user information
+            direct_messages = await self.get_direct_messages(headers, user_headers)
+            
+            print(f"DEBUG: Final result - Channels: {len(channels)}, Groups: {len(groups)}, DMs: {len(direct_messages)}")
+            
+            return {
+                'channels': channels,
+                'groups': groups,
+                'direct_messages': direct_messages
+            }
+                
+        except Exception as e:
+            print(f"Exception getting rooms list: {e}")
+            return {'channels': [], 'groups': [], 'direct_messages': []}
+
+    async def get_channels_and_groups(self, headers: Dict) -> tuple:
+        """Get channels and groups using rooms.get API"""
+        try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.get(f"{self.base_url}/api/v1/rooms.get", headers=headers)
                 
-                print(f"DEBUG: rooms.get API response status: {response.status_code}")
-                
                 if response.status_code != 200:
                     print(f"❌ Failed to get rooms list: HTTP {response.status_code}")
-                    print(f"DEBUG: Error response: {response.text}")
-                    return {'channels': [], 'groups': [], 'direct_messages': []}
+                    return [], []
                 
                 result = response.json()
-                print(f"DEBUG: rooms.get API response: {result}")
-                
                 if not result.get('success'):
                     print(f"❌ API error: {result.get('error', 'Unknown error')}")
-                    return {'channels': [], 'groups': [], 'direct_messages': []}
+                    return [], []
                 
                 rooms = result.get('update', [])
-                print(f"DEBUG: Found {len(rooms)} rooms via rooms.get")
-                
-                # Parse the rooms by type
                 channels = []
                 groups = []
-                direct_messages = []
                 
                 for room in rooms:
                     room_data = {
@@ -1489,22 +1544,103 @@ class RocketChatClient:
                     elif room.get('t') == 'p':  # Private group
                         room_data['type'] = 'private_group'
                         groups.append(room_data)
-                    elif room.get('t') == 'd':  # Direct message
-                        room_data['other_user'] = room.get('fname', room.get('name'))
-                        room_data['type'] = 'direct_message'
-                        direct_messages.append(room_data)
+                    # Skip DMs here - we'll handle them separately
                 
-                print(f"DEBUG: Parsed rooms - Channels: {len(channels)}, Groups: {len(groups)}, DMs: {len(direct_messages)}")
-                
-                return {
-                    'channels': channels,
-                    'groups': groups,
-                    'direct_messages': direct_messages
-                }
+                print(f"DEBUG: Found {len(channels)} channels and {len(groups)} groups via rooms.get")
+                return channels, groups
                 
         except Exception as e:
-            print(f"Exception getting rooms list: {e}")
-            return {'channels': [], 'groups': [], 'direct_messages': []}
+            print(f"Exception getting channels and groups: {e}")
+            return [], []
+
+    async def get_direct_messages(self, headers: Dict, user_headers: Dict = None) -> List[Dict]:
+        """Get direct messages using im.list API for better user information"""
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(f"{self.base_url}/api/v1/im.list", headers=headers)
+                
+                print(f"DEBUG: im.list API response status: {response.status_code}")
+                
+                if response.status_code != 200:
+                    print(f"❌ Failed to get DM list: HTTP {response.status_code}")
+                    print(f"DEBUG: Error response: {response.text}")
+                    return []
+                
+                result = response.json()
+                print(f"DEBUG: im.list API response: {result}")
+                
+                if not result.get('success'):
+                    print(f"❌ im.list API error: {result.get('error', 'Unknown error')}")
+                    return []
+                
+                ims = result.get('ims', [])
+                direct_messages = []
+                
+                # Get current user's username from headers
+                current_user_id = headers.get('X-User-Id', '')
+                print(f"DEBUG: Current user ID from headers: {current_user_id}")
+                
+                # Get current user's username dynamically
+                current_username = await self.get_current_user_username(headers)
+                print(f"DEBUG: Current user username: {current_username}")
+                
+                for im in ims:
+                    # Extract the other user's username from the usernames array
+                    usernames = im.get('usernames', [])
+                    other_user = None
+                    
+                    if len(usernames) >= 2:
+                        # Find the username that's not the current user
+                        for username in usernames:
+                            if username != current_username:
+                                other_user = username
+                                break
+                    
+                    # Fallback: if we can't determine the other user, use the first username
+                    if not other_user and usernames:
+                        other_user = usernames[0]
+                    
+                    room_data = {
+                        'id': im.get('_id'),
+                        'name': im.get('name'),
+                        'display_name': im.get('fname', im.get('name')),
+                        'unread_count': im.get('unread', 0),
+                        'type': 'direct_message',
+                        'open': im.get('open', True),
+                        'other_user': other_user
+                    }
+                    
+                    direct_messages.append(room_data)
+                    print(f"DEBUG: Added DM with other_user: {other_user} (usernames: {usernames})")
+                
+                print(f"DEBUG: Found {len(direct_messages)} DMs via im.list")
+                return direct_messages
+                
+        except Exception as e:
+            print(f"Exception getting direct messages: {e}")
+            return []
+
+    async def get_current_user_username(self, headers: Dict) -> str:
+        """Get the current user's username from Rocket.Chat"""
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                # Use the users.info API to get current user info
+                response = await client.get(f"{self.base_url}/api/v1/users.info", headers=headers)
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get('success'):
+                        user_info = result.get('user', {})
+                        username = user_info.get('username', '')
+                        print(f"DEBUG: Retrieved current user username: {username}")
+                        return username
+                
+                print(f"DEBUG: Failed to get current user username, using fallback")
+                return ''
+                
+        except Exception as e:
+            print(f"Exception getting current user username: {e}")
+            return ''
 
     async def get_groups_list(self, user_headers: Dict = None) -> List[Dict]:
         """Get list of private groups that the user is part of using groups.list API"""
@@ -1552,7 +1688,7 @@ class RocketChatClient:
                     formatted_groups.append(formatted_group)
                 
                 return formatted_groups
-                
+                        
         except Exception as e:
             print(f"Exception getting groups list: {e}")
             return []

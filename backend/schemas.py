@@ -100,6 +100,7 @@ class GroupResponse(BaseModel):
     created_at: datetime
     members: List[UserResponse]
     member_count: int
+    rocket_chat_group_id: Optional[str] = None
     
     class Config:
         from_attributes = True

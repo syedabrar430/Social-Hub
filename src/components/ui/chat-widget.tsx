@@ -562,11 +562,21 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onOpenFullChat }) => {
                           </div>
                         ) : (
                           filteredDMs.flatMap((dm) => {
-                            const displayName = dm.name || '';
+                            const displayName = dm.other_user || dm.name || '';
                             const users = displayName.includes(',')
                               ? displayName.split(',').map(name => name.trim())
                               : [displayName];
-                            return users.map((userName, index) => (
+                            
+                            // Get current user's username
+                            const currentUsername = user?.email?.split('@')[0];
+                            
+                            return users.map((userName, index) => {
+                              // Skip if the other user is the same as current user
+                              if (userName === currentUsername) {
+                                return null;
+                              }
+                              
+                              return (
                               <div
                                 key={`${dm.id}-${index}`}
                                 className="p-3 rounded-lg border hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors"
@@ -585,7 +595,8 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onOpenFullChat }) => {
                                   </div>
                                 </div>
                               </div>
-                            ));
+                              );
+                            }).filter(Boolean);
                           })
                         )}
                       </>

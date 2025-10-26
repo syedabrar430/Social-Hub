@@ -1079,6 +1079,78 @@ async def test_rooms_api(current_user: User = Depends(get_current_user), db: Ses
         print(f"Error testing rooms API: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to test rooms API: {str(e)}")
 
+@app.get("/api/rocket-chat/debug-dms")
+async def debug_dms_api(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Debug endpoint to see all DM details"""
+    try:
+        print(f"DEBUG: Debugging DMs for user: {current_user.email}")
+        
+        # Get user-specific headers for API calls
+        user_headers = await rocket_client.get_user_headers(
+            social_hub_user_email=current_user.email,
+            social_hub_user_name=current_user.full_name,
+            social_hub_user_id=str(current_user.id),
+            db_session=db
+        )
+        
+        # Get DMs using im.list API directly
+        import httpx
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(f"{rocket_client.base_url}/api/v1/im.list", headers=user_headers)
+            
+            if response.status_code == 200:
+                result = response.json()
+                if result.get('success'):
+                    ims = result.get('ims', [])
+                    
+                    # Get current user's username
+                    current_username = await rocket_client.get_current_user_username(user_headers)
+                    
+                    debug_info = []
+                    for im in ims:
+                        usernames = im.get('usernames', [])
+                        other_user = None
+                        
+                        if len(usernames) >= 2:
+                            for username in usernames:
+                                if username != current_username:
+                                    other_user = username
+                                    break
+                        
+                        debug_info.append({
+                            "dm_id": im.get('_id'),
+                            "usernames": usernames,
+                            "current_username": current_username,
+                            "other_user": other_user,
+                            "message_count": im.get('msgs', 0)
+                        })
+                    
+                    return {
+                        "success": True,
+                        "user": current_user.email,
+                        "current_username": current_username,
+                        "dms": debug_info,
+                        "message": "DM debug completed"
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "user": current_user.email,
+                        "error": result.get('error', 'Unknown error'),
+                        "message": "im.list API failed"
+                    }
+            else:
+                return {
+                    "success": False,
+                    "user": current_user.email,
+                    "error": f"HTTP {response.status_code}: {response.text}",
+                    "message": "im.list API failed"
+                }
+        
+    except Exception as e:
+        print(f"Error debugging DMs: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to debug DMs: {str(e)}")
+
 @app.get("/api/rocket-chat/find-group/{group_name}")
 async def find_group_by_name(group_name: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Find a group in Rocket.Chat by name and get its details"""
@@ -1639,23 +1711,96 @@ async def send_message_to_any_channel(
             db_session=db
         )
         
+        if not user_headers:
+            raise HTTPException(status_code=401, detail="Failed to authenticate user with Rocket.Chat")
+        
         # Send message to the specified channel
         message_text = message_data.get("text", message_data.get("content", ""))
         attachments = message_data.get("attachments", [])
         print(f"DEBUG: Extracted message text: '{message_text}'")
         print(f"DEBUG: Attachments: {len(attachments)} file(s)")
-        print(f"DEBUG: Attachment data: {attachments}")
-        result = await rocket_client.send_message_to_channel(channel_identifier, message_text, user_headers, attachments, channel_type)
+        
+        result = await rocket_client.send_message_to_channel(
+            channel_identifier, 
+            message_text, 
+            user_headers, 
+            attachments, 
+            channel_type
+        )
         print(f"DEBUG: Send message result: {result}")
+        print(f"DEBUG: Result type: {type(result)}")
+        print(f"DEBUG: Result keys: {result.keys() if isinstance(result, dict) else 'Not a dict'}")
         
         if result.get('success'):
             return {"success": True, "message": "Message sent successfully"}
         else:
-            raise HTTPException(status_code=500, detail=f"Failed to send message: {result.get('error', 'Unknown error')}")
+            error_msg = result.get('error', 'Unknown error')
+            print(f"❌ Failed to send message: '{error_msg}' (type: {type(error_msg)})")
+            if not error_msg or error_msg.strip() == '':
+                error_msg = f"Empty error message from Rocket.Chat for {channel_type} '{channel_identifier}'"
+            raise HTTPException(status_code=500, detail=f"Failed to send message: {error_msg}")
             
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error sending message to channel: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to send message: {str(e)}")
+
+@app.get("/api/rocket-chat/debug-user-mapping/{user_email}")
+async def debug_user_mapping(
+    user_email: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Debug user mapping between Social Hub and Rocket.Chat"""
+    try:
+        print(f"DEBUG: Checking user mapping for: {user_email}")
+        
+        # Get user-specific headers
+        user_headers = await rocket_client.get_user_headers(
+            social_hub_user_email=user_email,
+            social_hub_user_name="Test User",
+            social_hub_user_id="1",
+            db_session=db
+        )
+        
+        if user_headers:
+            # Get current user info from Rocket.Chat
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(
+                    f"{rocket_client.base_url}/api/v1/users.info",
+                    headers=user_headers,
+                    params={"username": user_headers.get("X-User-Id")}
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get('success'):
+                        user_info = result.get('user', {})
+                        return {
+                            "success": True,
+                            "social_hub_email": user_email,
+                            "rocket_chat_user": {
+                                "id": user_info.get('_id'),
+                                "username": user_info.get('username'),
+                                "name": user_info.get('name'),
+                                "emails": user_info.get('emails', [])
+                            },
+                            "headers": {
+                                "X-User-Id": user_headers.get("X-User-Id"),
+                                "X-Auth-Token": user_headers.get("X-Auth-Token")[:20] + "..." if user_headers.get("X-Auth-Token") else None
+                            }
+                        }
+                    else:
+                        return {"success": False, "error": "Failed to get user info from Rocket.Chat"}
+                else:
+                    return {"success": False, "error": f"HTTP {response.status_code}: {response.text}"}
+        else:
+            return {"success": False, "error": "Failed to get user headers"}
+            
+    except Exception as e:
+        print(f"Error debugging user mapping: {e}")
+        return {"success": False, "error": str(e)}
 
 # Rocket.Chat SSO endpoint
 @app.post("/api/rocket-chat/sso-url")
@@ -1743,11 +1888,14 @@ async def send_thread_message(
     try:
         print(f"DEBUG: Sending thread message for user: {current_user.email}")
         
+        print(f"DEBUG: Message data: {message_data}")
+        
         room_id = message_data.get("roomId")
         thread_id = message_data.get("threadId")
         content = message_data.get("content")
         
         if not room_id or not thread_id or not content:
+            print(f"DEBUG: Missing required fields - room_id: {room_id}, thread_id: {thread_id}, content: {content}")
             raise HTTPException(status_code=400, detail="Room ID, thread ID, and content are required")
         
         # Get user-specific headers for API calls
@@ -1758,12 +1906,18 @@ async def send_thread_message(
             db_session=db
         )
         
+        print(f"DEBUG: User headers obtained: {user_headers is not None}")
+        
         result = await rocket_client.send_thread_message(room_id, thread_id, content, user_headers)
+        
+        print(f"DEBUG: send_thread_message result: {result}")
         
         if result.get('success'):
             return {"success": True, "message": "Thread message sent successfully"}
         else:
-            raise HTTPException(status_code=500, detail=f"Failed to send thread message: {result.get('error', 'Unknown error')}")
+            error_msg = result.get('error', 'Unknown error')
+            print(f"❌ Thread message failed: {error_msg}")
+            raise HTTPException(status_code=500, detail=f"Failed to send thread message: {error_msg}")
             
     except Exception as e:
         print(f"Error sending thread message: {e}")
@@ -2173,7 +2327,8 @@ async def create_group_endpoint(
             created_by=group.created_by,
             created_at=group.created_at,
             members=member_responses,
-            member_count=len(member_responses)
+            member_count=len(member_responses),
+            rocket_chat_group_id=group.rocket_chat_group_id
         )
     except HTTPException:
         raise
@@ -2181,16 +2336,49 @@ async def create_group_endpoint(
         raise HTTPException(status_code=500, detail=f"Failed to create group: {str(e)}")
 
 @app.get("/groups", response_model=List[GroupResponse])
-def get_user_groups_endpoint(
+async def get_user_groups_endpoint(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Get all groups for the current user"""
+    """Get all groups for the current user that exist in Rocket.Chat"""
     try:
         groups = get_user_groups(db, current_user.id)
         group_responses = []
         
+        # Get user-specific headers for Rocket.Chat API calls
+        user_headers = await rocket_client.get_user_headers(
+            social_hub_user_email=current_user.email,
+            social_hub_user_name=current_user.full_name,
+            social_hub_user_id=str(current_user.id),
+            db_session=db
+        )
+        
         for group in groups:
+            # Check if group exists in Rocket.Chat
+            if group.rocket_chat_group_id:
+                # Check if the Rocket.Chat group still exists
+                group_check = await rocket_client.check_group_exists(group.rocket_chat_group_id, user_headers)
+                if not group_check.get("exists", False):
+                    print(f"⚠️ Group '{group.name}' (ID: {group.rocket_chat_group_id}) not found in Rocket.Chat, skipping")
+                    continue
+            else:
+                # If no Rocket.Chat ID, try to find the group by name
+                rocket_name = group.name.lower().replace('_', '-').replace(' ', '-')
+                import re
+                rocket_name = re.sub(r'[^a-z0-9-]', '', rocket_name)
+                rocket_name = rocket_name.strip('-')
+                
+                group_search = await rocket_client.find_group_by_name(rocket_name, user_headers)
+                if not group_search.get("found", False):
+                    print(f"⚠️ Group '{group.name}' not found in Rocket.Chat by name '{rocket_name}', skipping")
+                    continue
+                else:
+                    # Update the group with the correct Rocket.Chat ID
+                    group.rocket_chat_group_id = group_search.get("id")
+                    db.commit()
+                    print(f"✅ Updated group '{group.name}' with Rocket.Chat ID: {group_search.get('id')}")
+            
+            # Group exists in Rocket.Chat, include it in response
             members = get_group_members(db, group.id)
             member_responses = [UserResponse.from_orm(member.user) for member in members]
             
@@ -2201,11 +2389,14 @@ def get_user_groups_endpoint(
                 created_by=group.created_by,
                 created_at=group.created_at,
                 members=member_responses,
-                member_count=len(member_responses)
+                member_count=len(member_responses),
+                rocket_chat_group_id=group.rocket_chat_group_id
             ))
         
+        print(f"✅ Returning {len(group_responses)} groups that exist in Rocket.Chat")
         return group_responses
     except Exception as e:
+        print(f"❌ Error getting groups: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get groups: {str(e)}")
 
 @app.get("/groups/{group_id}", response_model=GroupResponse)
@@ -2234,7 +2425,8 @@ def get_group_endpoint(
             created_by=group.created_by,
             created_at=group.created_at,
             members=member_responses,
-            member_count=len(member_responses)
+            member_count=len(member_responses),
+            rocket_chat_group_id=group.rocket_chat_group_id
         )
     except HTTPException:
         raise

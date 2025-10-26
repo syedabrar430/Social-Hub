@@ -322,8 +322,37 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedChannel, isAuthenticate
 
     try {
       setSending(true);
-      const channelIdentifier = selectedChannel.name || selectedChannel.id;
+      
+      // For private groups, use rocket_chat_group_id if available, otherwise normalize the name
+      let channelIdentifier;
+      if (selectedChannel.type === 'private_group') {
+        // For private groups, use rocket_chat_group_id if available, otherwise normalize the name
+        if ((selectedChannel as any).rocket_chat_group_id) {
+          channelIdentifier = (selectedChannel as any).rocket_chat_group_id;
+          console.log('🔍 Using rocket_chat_group_id for main message:', channelIdentifier);
+        } else {
+          // Fallback to normalized group name
+          channelIdentifier = selectedChannel.name
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, '-')
+            .replace(/-+/g, '-')
+            .replace(/^-|-$/g, '');
+          console.log('🔍 Using normalized group name for main message:', channelIdentifier);
+        }
+        
+        console.log('🔍 Private group identifier:', { 
+          rocket_chat_group_id: (selectedChannel as any).rocket_chat_group_id,
+          name: selectedChannel.name,
+          normalizedName: channelIdentifier,
+          finalIdentifier: channelIdentifier 
+        });
+      } else {
+        channelIdentifier = selectedChannel.name || selectedChannel.id;
+      }
+      
       const channelType = selectedChannel.type === 'private_group' ? 'group' : 'channel';
+
+      console.log('🔍 Sending message to:', { channelIdentifier, channelType, selectedChannel });
 
       await chatService.sendRocketChatChannelMessage(
         channelIdentifier,
@@ -398,7 +427,33 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedChannel, isAuthenticate
   // Handle thread message send
   const handleSendThreadMessage = async (parentMessageId: string, text: string) => {
     try {
-      const channelIdentifier = selectedChannel.name || selectedChannel.id;
+      // Use the same channel identifier logic as main message sending
+      let channelIdentifier;
+      if (selectedChannel.type === 'private_group') {
+        // For private groups, use rocket_chat_group_id if available, otherwise normalize the name
+        if ((selectedChannel as any).rocket_chat_group_id) {
+          channelIdentifier = (selectedChannel as any).rocket_chat_group_id;
+          console.log('🔍 Using rocket_chat_group_id for thread message:', channelIdentifier);
+        } else {
+          // Fallback to normalized group name
+          channelIdentifier = selectedChannel.name
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, '-')
+            .replace(/-+/g, '-')
+            .replace(/^-|-$/g, '');
+          console.log('🔍 Using normalized group name for thread message:', channelIdentifier);
+        }
+        
+        console.log('🔍 Thread message - Private group identifier:', { 
+          rocket_chat_group_id: (selectedChannel as any).rocket_chat_group_id,
+          name: selectedChannel.name,
+          normalizedName: channelIdentifier,
+          finalIdentifier: channelIdentifier 
+        });
+      } else {
+        channelIdentifier = selectedChannel.name || selectedChannel.id;
+      }
+      
       await chatService.sendThreadMessage(channelIdentifier, parentMessageId, text);
       
       toast({

@@ -23,7 +23,7 @@ const Navbar = () => {
     { path: '/profile', icon: User, label: 'Profile' },
     { path: '/notifications', icon: Bell, label: 'Notifications' },
     { path: '/messages', icon: MessageCircle, label: 'Messages' },
-    { path: '/groups', icon: Users, label: 'Groups' },
+    { path: '/groups', icon: Users, label: 'Private Groups' },
   ];
 
   const isActive = (path: string) => location.pathname === path;

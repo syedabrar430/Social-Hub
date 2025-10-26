@@ -460,14 +460,41 @@ const EnhancedMessagesWidget: React.FC<EnhancedMessagesWidgetProps> = ({ openGro
         });
         await rocketChatService.sendDirectMessage(username, messageContent, uploadedFiles);
       } else {
+        // For private groups, use the rocket_chat_group_id if available, otherwise use name
+        let channelIdentifier;
+        if (selectedConversation.type === 'private_group') {
+          // For private groups, use rocket_chat_group_id if available, otherwise normalize the name
+          if ((selectedConversation as any).rocket_chat_group_id) {
+            channelIdentifier = (selectedConversation as any).rocket_chat_group_id;
+            console.log('🔍 Using rocket_chat_group_id for main message:', channelIdentifier);
+          } else {
+            // Fallback to normalized group name
+            channelIdentifier = selectedConversation.name
+              .toLowerCase()
+              .replace(/[^a-z0-9]/g, '-')
+              .replace(/-+/g, '-')
+              .replace(/^-|-$/g, '');
+            console.log('🔍 Using normalized group name for main message:', channelIdentifier);
+          }
+          
+          console.log('🔍 Private group identifier:', { 
+            rocket_chat_group_id: (selectedConversation as any).rocket_chat_group_id,
+            name: selectedConversation.name,
+            normalizedName: channelIdentifier,
+            finalIdentifier: channelIdentifier 
+          });
+        } else {
+          channelIdentifier = selectedConversation.name || selectedConversation.id;
+        }
+        
         console.log('DEBUG: Calling sendRocketChatChannelMessage with:', {
-          channelIdentifier: selectedConversation.name || selectedConversation.id,
+          channelIdentifier: channelIdentifier,
           text: messageContent,
           channelType: selectedConversation.type === 'private_group' ? 'group' : 'channel',
           attachments: uploadedFiles
         });
         await rocketChatService.sendRocketChatChannelMessage(
-          selectedConversation.name || selectedConversation.id,
+          channelIdentifier,
           messageContent,
           selectedConversation.type === 'private_group' ? 'group' : 'channel',
           uploadedFiles
@@ -528,9 +555,20 @@ const EnhancedMessagesWidget: React.FC<EnhancedMessagesWidgetProps> = ({ openGro
     } catch (error) {
       console.error('Failed to send message:', error);
       console.error('Error details:', error);
+      
+      // Extract more detailed error information
+      let errorMessage = 'Unknown error';
+      if (error instanceof Error) {
+        errorMessage = error.message;
+        // If the error message is empty or just "Failed to send message:", try to get more details
+        if (errorMessage === 'Failed to send message:' || errorMessage === 'Failed to send message') {
+          errorMessage = 'Failed to send message. Please check your connection and try again.';
+        }
+      }
+      
       toast({
         title: "Error",
-        description: `Failed to send message: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        description: `Failed to send message: ${errorMessage}`,
         variant: "destructive",
       });
       // Clear selected files even on error
@@ -612,8 +650,32 @@ const EnhancedMessagesWidget: React.FC<EnhancedMessagesWidgetProps> = ({ openGro
     });
     setSendingThreadReply(parentMessageId);
     try {
-      // Use the same logic for all conversation types - use name for consistency
-      const roomIdentifier = selectedConversation?.name || selectedConversation?.id;
+      // Use the same channel identifier logic as main message sending
+      let roomIdentifier;
+      if (selectedConversation.type === 'private_group') {
+        // For private groups, use rocket_chat_group_id if available, otherwise normalize the name
+        if ((selectedConversation as any).rocket_chat_group_id) {
+          roomIdentifier = (selectedConversation as any).rocket_chat_group_id;
+          console.log('🔍 Using rocket_chat_group_id for thread message:', roomIdentifier);
+        } else {
+          // Fallback to normalized group name
+          roomIdentifier = selectedConversation.name
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, '-')
+            .replace(/-+/g, '-')
+            .replace(/^-|-$/g, '');
+          console.log('🔍 Using normalized group name for thread message:', roomIdentifier);
+        }
+        
+        console.log('🔍 Thread message - Private group identifier:', { 
+          rocket_chat_group_id: (selectedConversation as any).rocket_chat_group_id,
+          name: selectedConversation.name,
+          normalizedName: roomIdentifier,
+          finalIdentifier: roomIdentifier 
+        });
+      } else {
+        roomIdentifier = selectedConversation?.name || selectedConversation?.id;
+      }
       
       console.log('DEBUG: Using room identifier:', roomIdentifier);
       console.log('DEBUG: Parent message ID:', parentMessageId);
@@ -740,11 +802,22 @@ const EnhancedMessagesWidget: React.FC<EnhancedMessagesWidgetProps> = ({ openGro
   };
 
   const conversations = getConversations();
-  const filteredConversations = conversations.filter(conv =>
-    conv.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    conv.display_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    conv.other_user?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredConversations = conversations.filter(conv => {
+    // Basic search filter
+    const matchesSearch = conv.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      conv.display_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      conv.other_user?.toLowerCase().includes(searchQuery.toLowerCase());
+    
+    // For DMs, exclude if the other user is the same as current user
+    if (conv.type === 'direct_message') {
+      const currentUsername = user?.email?.split('@')[0];
+      if (conv.other_user === currentUsername) {
+        return false;
+      }
+    }
+    
+    return matchesSearch;
+  });
 
   // Debug logging for conversations
   console.log('🔍 EnhancedMessagesWidget - Conversations:', {
@@ -988,7 +1061,7 @@ const EnhancedMessagesWidget: React.FC<EnhancedMessagesWidgetProps> = ({ openGro
                               }`}></div>
                               <div>
                                 <div className="font-medium text-sm">
-                                  {isDM ? conversation.name : (conversation.display_name || conversation.name || conversation.other_user)}
+                                  {isDM ? conversation.other_user : (conversation.display_name || conversation.name || conversation.other_user)}
                                   {isDM && <span className="ml-2 text-xs bg-green-100 text-green-800 px-2 py-1 rounded">DM</span>}
                                   {isGroup && <span className="ml-2 text-xs bg-purple-100 text-purple-800 px-2 py-1 rounded">Group</span>}
                                   {isChannel && <span className="ml-2 text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">Channel</span>}
@@ -1036,7 +1109,7 @@ const EnhancedMessagesWidget: React.FC<EnhancedMessagesWidgetProps> = ({ openGro
                           }
                         </h2>
                         <p className="text-sm text-muted-foreground">
-                          {selectedConversation.type === 'direct_message' ? 'Direct Message' :
+                          {selectedConversation.type === 'direct_message' ? selectedConversation.other_user :
                            selectedConversation.type === 'private_group' ? 'Private Group' : 'Rocket.Chat Channel'}
                         </p>
                       </div>

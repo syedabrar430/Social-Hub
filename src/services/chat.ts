@@ -55,6 +55,18 @@ export interface ChatConversation {
   other_user?: string;
   last_message?: ChatMessage;
   unread_count: number;
+  rocket_chat_group_id?: string; // Add this field for private groups
+}
+
+export interface Group {
+  id: number;
+  name: string;
+  description?: string;
+  created_by: number;
+  created_at: string;
+  members: any[];
+  member_count: number;
+  rocket_chat_group_id?: string;
 }
 
 export interface ChatRoom {
@@ -169,7 +181,17 @@ class ChatService {
         ...(allRooms.groups || [])
       ];
       
-      return channelsAndGroups;
+      // Deduplicate based on name (case-insensitive)
+      const uniqueConversations = new Map<string, ChatConversation>();
+      
+      for (const conversation of channelsAndGroups) {
+        const normalizedName = conversation.name.toLowerCase();
+        if (!uniqueConversations.has(normalizedName)) {
+          uniqueConversations.set(normalizedName, conversation);
+        }
+      }
+      
+      return Array.from(uniqueConversations.values());
     } catch (error) {
       console.error('Failed to get channels with messages:', error);
       throw error;
@@ -177,13 +199,70 @@ class ChatService {
   }
 
   // Get groups that have messages > 0
+  // Get private groups from local database (same as Groups page)
+  async getPrivateGroups(): Promise<ChatConversation[]> {
+    try {
+      const response = await this.request<Group[]>('/groups');
+      
+      // Convert Group format to ChatConversation format
+      return response.map(group => ({
+        id: group.rocket_chat_group_id || group.name, // Use Rocket.Chat ID if available, fallback to group name
+        name: group.name,
+        display_name: group.name,
+        description: group.description || '',
+        type: 'private_group',
+        unread_count: 0,
+        member_count: group.member_count,
+        last_message: null,
+        other_user: null,
+        is_private: true,
+        rocket_chat_group_id: group.rocket_chat_group_id // Add this field
+      }));
+    } catch (error) {
+      console.error('Failed to get private groups:', error);
+      throw error;
+    }
+  }
+
+  // Get all groups (Rocket.Chat groups + local private groups)
+  async getAllGroupsWithMessages(): Promise<ChatConversation[]> {
+    try {
+      // Get Rocket.Chat groups
+      const rocketChatGroups = await this.getRocketChatGroups();
+      
+      // Get local private groups
+      const privateGroups = await this.getPrivateGroups();
+      
+      // Merge both arrays
+      return [...rocketChatGroups, ...privateGroups];
+    } catch (error) {
+      console.error('Failed to get all groups with messages:', error);
+      throw error;
+    }
+  }
+
   async getGroupsWithMessages(): Promise<ChatConversation[]> {
     try {
-      // First get all groups
-      const allGroups = await this.getRocketChatGroups();
+      // Use the new method that gets both Rocket.Chat and local private groups
+      const allGroups = await this.getAllGroupsWithMessages();
       
-      // Return all groups - let the frontend handle display logic
-      return allGroups;
+      // Deduplicate groups based on name (case-insensitive)
+      const uniqueGroups = new Map<string, ChatConversation>();
+      
+      for (const group of allGroups) {
+        const normalizedName = group.name.toLowerCase();
+        if (!uniqueGroups.has(normalizedName)) {
+          uniqueGroups.set(normalizedName, group);
+        } else {
+          // If duplicate found, prefer the one with rocket_chat_group_id
+          const existing = uniqueGroups.get(normalizedName)!;
+          if (!existing.id.startsWith('rocket_') && group.id.startsWith('rocket_')) {
+            uniqueGroups.set(normalizedName, group);
+          }
+        }
+      }
+      
+      return Array.from(uniqueGroups.values());
     } catch (error) {
       console.error('Failed to get groups with messages:', error);
       throw error;
