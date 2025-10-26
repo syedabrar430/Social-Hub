@@ -442,6 +442,96 @@ class RocketChatClient:
             print(f"Exception getting channel ID: {e}")
             return None
 
+    async def create_private_group(self, group_name: str, members: List[str] = None, user_headers: Dict = None) -> Dict:
+        """Create a private group in Rocket.Chat"""
+        try:
+            if not user_headers:
+                print("❌ User headers required for creating private groups")
+                return {"success": False, "error": "User authentication required"}
+            
+            # Convert group name to valid Rocket.Chat format (lowercase, no spaces, special chars)
+            valid_name = group_name.lower().replace(' ', '-').replace('_', '-')
+            # Remove any other special characters except hyphens
+            import re
+            valid_name = re.sub(r'[^a-z0-9-]', '', valid_name)
+            # Ensure it doesn't start or end with hyphen
+            valid_name = valid_name.strip('-')
+            
+            group_data = {
+                "name": valid_name,
+                "type": "p",  # Private group
+                "members": members or []
+            }
+            
+            print(f"🔧 Creating private group '{group_name}' with members: {members}")
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{self.base_url}/api/v1/groups.create",
+                    headers=user_headers,
+                    json=group_data
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get('success'):
+                        group_id = result.get('group', {}).get('_id')
+                        print(f"✅ Successfully created private group '{group_name}' with ID: {group_id}")
+                        return {
+                            "success": True,
+                            "group_id": group_id,
+                            "group": result.get('group', {})
+                        }
+                    else:
+                        error_msg = result.get('error', 'Unknown error')
+                        print(f"❌ Failed to create private group: {error_msg}")
+                        return {"success": False, "error": error_msg}
+                else:
+                    print(f"❌ Failed to create private group - HTTP {response.status_code}: {response.text}")
+                    return {"success": False, "error": f"HTTP {response.status_code}: {response.text}"}
+                    
+        except Exception as e:
+            print(f"Exception creating private group: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def add_member_to_group(self, group_id: str, username: str, user_headers: Dict = None) -> Dict:
+        """Add a member to a Rocket.Chat group"""
+        try:
+            if not user_headers:
+                print("❌ User headers required for adding members to groups")
+                return {"success": False, "error": "User authentication required"}
+            
+            member_data = {
+                "roomId": group_id,
+                "username": username
+            }
+            
+            print(f"🔧 Adding member '{username}' to group '{group_id}'")
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{self.base_url}/api/v1/groups.invite",
+                    headers=user_headers,
+                    json=member_data
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get('success'):
+                        print(f"✅ Successfully added member '{username}' to group")
+                        return {"success": True, "group": result.get('group', {})}
+                    else:
+                        error_msg = result.get('error', 'Unknown error')
+                        print(f"❌ Failed to add member: {error_msg}")
+                        return {"success": False, "error": error_msg}
+                else:
+                    print(f"❌ Failed to add member - HTTP {response.status_code}: {response.text}")
+                    return {"success": False, "error": f"HTTP {response.status_code}: {response.text}"}
+                    
+        except Exception as e:
+            print(f"Exception adding member to group: {e}")
+            return {"success": False, "error": str(e)}
+
     async def send_message_to_channel(self, channel_name: str, text: str, user_headers: Dict = None, attachments: List[Dict] = None) -> Dict:
         """Send message to a channel with optional file attachments"""
         try:

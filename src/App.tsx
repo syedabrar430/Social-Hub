@@ -12,6 +12,7 @@ import Feed from "./pages/Feed";
 import Profile from "./pages/Profile";
 import Notifications from "./pages/Notifications";
 import Messages from "./pages/Messages";
+import Groups from "./pages/Groups";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -45,6 +46,11 @@ const App = () => (
             <Route path="/messages" element={
               <ProtectedRoute>
                 <Messages />
+              </ProtectedRoute>
+            } />
+            <Route path="/groups" element={
+              <ProtectedRoute>
+                <Groups />
               </ProtectedRoute>
             } />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

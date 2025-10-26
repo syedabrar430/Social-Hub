@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Home, User, Bell, MessageCircle, LogOut } from 'lucide-react';
+import { Home, User, Bell, MessageCircle, Users, LogOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -23,6 +23,7 @@ const Navbar = () => {
     { path: '/profile', icon: User, label: 'Profile' },
     { path: '/notifications', icon: Bell, label: 'Notifications' },
     { path: '/messages', icon: MessageCircle, label: 'Messages' },
+    { path: '/groups', icon: Users, label: 'Groups' },
   ];
 
   const isActive = (path: string) => location.pathname === path;

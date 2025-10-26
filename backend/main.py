@@ -230,7 +230,7 @@ async def google_auth(google_request: GoogleAuthRequest, db: Session = Depends(g
         )
 
 # Get current user (protected endpoint)
-async def get_current_user(
+def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db)
 ) -> User:
@@ -354,40 +354,6 @@ async def logout():
     return {"message": "Successfully logged out"}
 
 # Search users endpoint
-@app.get("/api/users/search")
-async def search_users(
-    query: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Search users in the Social Hub database"""
-    try:
-        # Search users by name, email, or rocket_chat_username (case-insensitive)
-        users = db.query(User).filter(
-            (User.full_name.ilike(f"%{query}%")) |
-            (User.email.ilike(f"%{query}%")) |
-            (User.rocket_chat_username.ilike(f"%{query}%"))
-        ).filter(User.id != current_user.id).limit(20).all()
-        
-        # Format response
-        search_results = []
-        for user in users:
-            search_results.append({
-                "id": str(user.id),
-                "username": user.rocket_chat_username or user.email.split('@')[0],  # Use rocket_chat_username or email prefix
-                "full_name": user.full_name,
-                "email": user.email,
-                "profile_picture": user.profile_picture_url,
-                "rocket_chat_username": user.rocket_chat_username
-            })
-        
-        return {
-            "users": search_results,
-            "count": len(search_results)
-        }
-    except Exception as e:
-        print(f"Error searching users: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to search users: {str(e)}")
 
 # ==================== ROCKET.CHAT ENDPOINTS ====================
 
@@ -1855,8 +1821,32 @@ async def create_group_endpoint(
 ):
     """Create a new private group"""
     try:
-        # Create the group
+        # Get user-specific headers for Rocket.Chat API calls
+        user_headers = await rocket_client.get_user_headers(
+            social_hub_user_email=current_user.email,
+            social_hub_user_name=current_user.full_name,
+            social_hub_user_id=str(current_user.id),
+            db_session=db
+        )
+        
+        # Create the group in Rocket.Chat first
+        rocket_group_result = await rocket_client.create_private_group(
+            group_name=group_data.name,
+            members=[],  # Start with empty members, add creator later
+            user_headers=user_headers
+        )
+        
+        if not rocket_group_result.get('success'):
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Failed to create Rocket.Chat group: {rocket_group_result.get('error', 'Unknown error')}"
+            )
+        
+        # Create the group in our database
         group = create_group(db, group_data.dict(), current_user.id)
+        
+        # Store Rocket.Chat group ID in the database (we'll need to add this field)
+        # For now, we'll just create the local group
         
         # Get group members for response
         members = get_group_members(db, group.id)
@@ -1871,11 +1861,13 @@ async def create_group_endpoint(
             members=member_responses,
             member_count=len(member_responses)
         )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create group: {str(e)}")
 
 @app.get("/groups", response_model=List[GroupResponse])
-async def get_user_groups_endpoint(
+def get_user_groups_endpoint(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -1903,7 +1895,7 @@ async def get_user_groups_endpoint(
         raise HTTPException(status_code=500, detail=f"Failed to get groups: {str(e)}")
 
 @app.get("/groups/{group_id}", response_model=GroupResponse)
-async def get_group_endpoint(
+def get_group_endpoint(
     group_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -1936,7 +1928,7 @@ async def get_group_endpoint(
         raise HTTPException(status_code=500, detail=f"Failed to get group: {str(e)}")
 
 @app.put("/groups/{group_id}", response_model=GroupResponse)
-async def update_group_endpoint(
+def update_group_endpoint(
     group_id: int,
     group_data: GroupUpdate,
     current_user: User = Depends(get_current_user),
@@ -1976,7 +1968,7 @@ async def update_group_endpoint(
         raise HTTPException(status_code=500, detail=f"Failed to update group: {str(e)}")
 
 @app.delete("/groups/{group_id}")
-async def delete_group_endpoint(
+def delete_group_endpoint(
     group_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -2023,6 +2015,18 @@ async def add_member_to_group_endpoint(
         if not user_to_add:
             raise HTTPException(status_code=404, detail="User not found")
         
+        # Get user-specific headers for Rocket.Chat API calls
+        user_headers = await rocket_client.get_user_headers(
+            social_hub_user_email=current_user.email,
+            social_hub_user_name=current_user.full_name,
+            social_hub_user_id=str(current_user.id),
+            db_session=db
+        )
+        
+        # Add the user to the Rocket.Chat group (if we have the group ID)
+        # For now, we'll just add to our local database
+        # TODO: Integrate with Rocket.Chat group when we store the group ID
+        
         # Add the user to the group
         member = add_member_to_group(db, group_id, user_to_add.id)
         if not member:
@@ -2041,7 +2045,7 @@ async def add_member_to_group_endpoint(
         raise HTTPException(status_code=500, detail=f"Failed to add member: {str(e)}")
 
 @app.delete("/groups/{group_id}/members/{user_id}")
-async def remove_member_from_group_endpoint(
+def remove_member_from_group_endpoint(
     group_id: int,
     user_id: int,
     current_user: User = Depends(get_current_user),
@@ -2076,7 +2080,7 @@ async def remove_member_from_group_endpoint(
         raise HTTPException(status_code=500, detail=f"Failed to remove member: {str(e)}")
 
 @app.get("/groups/{group_id}/members", response_model=List[GroupMemberResponse])
-async def get_group_members_endpoint(
+def get_group_members_endpoint(
     group_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -2108,7 +2112,7 @@ async def get_group_members_endpoint(
         raise HTTPException(status_code=500, detail=f"Failed to get group members: {str(e)}")
 
 @app.get("/users/search", response_model=List[UserSearchResponse])
-async def search_users_endpoint(
+def search_users_endpoint(
     query: str,
     limit: int = 10,
     current_user: User = Depends(get_current_user),
