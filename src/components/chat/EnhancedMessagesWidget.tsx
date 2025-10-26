@@ -135,9 +135,10 @@ const EnhancedMessagesWidget = () => {
     return null;
   };
 
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+  // Removed auto-scroll to bottom when messages change
+  // useEffect(() => {
+  //   scrollToBottom();
+  // }, [messages]);
 
   // Load conversations when component mounts
   useEffect(() => {
