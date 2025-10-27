@@ -2,6 +2,33 @@
 
 A full-stack social media platform with React.js frontend and FastAPI backend, featuring Google OAuth authentication and modern design.
 
+## 🚀 Quick Start
+
+For new users cloning from GitHub:
+
+```bash
+# 1. Clone and install
+git clone <repository-url>
+cd Social-Hub
+npm install
+cd backend && python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+
+# 2. Configure environment
+cp .env.example .env  # Frontend
+cp backend/.env.example backend/.env  # Backend
+# Edit backend/.env with your Rocket.Chat server credentials
+
+# 3. Run the app
+python main.py  # Terminal 1 (backend on :8000)
+npm run dev     # Terminal 2 (frontend on :8080)
+```
+
+📝 **Note**: 
+- The database (`backend/social_hub.db`) is already included with sample users
+- Rocket.Chat server is hosted separately (no local setup needed)
+- All users from the database are synced with Rocket.Chat via Single Sign-On (SSO)
+
 ## 🎨 Features
 
 ### Authentication & User Management
@@ -26,51 +53,125 @@ A full-stack social media platform with React.js frontend and FastAPI backend, f
 - **Google OAuth Verification** server-side
 - **CORS Enabled** for frontend integration
 
-## 🚀 Complete Setup Guide
+## 🚀 Quick Start Guide
 
-### Prerequisites
-- **Node.js** (16.x or higher)
-- **Python** (3.8 or higher)
-- **Git**
-- **Google Cloud Console** account (for OAuth)
+### For New Users (Clone from GitHub)
 
----
+If you're pulling this code from GitHub for the first time, follow these steps:
 
-## 📋 Step 1: Project Setup
-
-### 1.1 Clone the Repository
+#### 1. Clone the Repository
 ```bash
 git clone <repository-url>
 cd Social-Hub
 ```
 
-### 1.2 Project Structure
+#### 2. Install Dependencies
+
+**Frontend Dependencies:**
+```bash
+npm install
 ```
-Social-Hub/
-├── src/                    # Frontend React app
-├── backend/               # FastAPI backend
-├── public/               # Static assets
-├── .env.example         # Frontend environment template
-├── backend/.env.example # Backend environment template
-└── README.md           # This file
+
+**Backend Dependencies:**
+```bash
+cd backend
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -r requirements.txt
+cd ..
+```
+
+#### 3. Configure Environment Variables
+
+**Frontend:**
+```bash
+cp .env.example .env
+# Edit .env and add your Google OAuth Client ID
+```
+
+**Backend:**
+```bash
+cd backend
+cp .env.example .env
+```
+
+# Database (already configured)
+DATABASE_URL=sqlite:///./social_hub.db
+
+# JWT Settings
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+```
+
+#### 4. Run the Application
+
+**Terminal 1 - Backend:**
+```bash
+cd backend
+python main.py
+# Backend will be available at http://localhost:8000
+```
+
+**Terminal 2 - Frontend:**
+```bash
+npm run dev
+# Frontend will be available at http://localhost:8080
 ```
 
 ---
 
-## 🔑 Step 2: Google OAuth Setup
+## 📋 Prerequisites
+- **Node.js** (16.x or higher)
+- **Python** (3.8 or higher)
+- **Git**
+- **Access to Rocket.Chat Server** (credentials provided separately)
+- **Google Cloud Console** account (for OAuth) - Optional
 
-### 2.1 Create Google Cloud Project
+## 🏗️ Project Structure
+```
+Social-Hub/
+├── src/                      # Frontend React app
+├── backend/                 # FastAPI backend
+│   ├── main.py              # Backend server
+│   ├── database.py          # Database models
+│   ├── auth.py              # Authentication logic
+│   ├── crud.py              # Database operations
+│   ├── rocket_chat_local.py # Rocket.Chat integration
+│   ├── social_hub.db        # SQLite database (included in repo)
+│   └── requirements.txt     # Python dependencies
+├── public/                  # Static assets
+├── .env.example            # Frontend environment template
+└── README.md               # This file
+```
+
+---
+
+## 🚀 Step 2: Rocket.Chat Configuration (Required for Messaging)
+
+This application uses a hosted Rocket.Chat server for messaging features via REST APIs.
+
+### 2.1 Rocket.Chat Server Information
+
+- **Server URL**: The Rocket.Chat server is hosted separately and accessible at `http://10.68.0.49:30082`
+- **SSO Integration**: All users from the Social Hub database are automatically synced with Rocket.Chat via Single Sign-On (SSO)
+- **No Local Setup Required**: You don't need to install or run Rocket.Chat locally
+```
+
+---
+
+## 🔑 Step 3: Google OAuth Setup
+
+### 3.1 Create Google Cloud Project
 1. Go to [Google Cloud Console](https://console.cloud.google.com/)
 2. Click **"Select a project"** → **"New Project"**
 3. Enter project name: **"Social Hub"**
 4. Click **"Create"**
 
-### 2.2 Enable Google Identity API
+### 3.2 Enable Google Identity API
 1. Go to **"APIs & Services"** → **"Library"**
 2. Search for **"Google Identity"**
 3. Click **"Enable"**
 
-### 2.3 Configure OAuth Consent Screen
+### 3.3 Configure OAuth Consent Screen
 1. Go to **"APIs & Services"** → **"OAuth consent screen"**
 2. Choose **"External"** → **"Create"**
 3. Fill required fields:
@@ -79,7 +180,7 @@ Social-Hub/
    - **Developer contact**: Your email
 4. Click **"Save and Continue"** through all steps
 
-### 2.4 Create OAuth Credentials
+### 3.4 Create OAuth Credentials
 1. Go to **"APIs & Services"** → **"Credentials"**
 2. Click **"Create Credentials"** → **"OAuth client ID"**
 3. Select **"Web application"**
@@ -94,13 +195,26 @@ Social-Hub/
 
 ---
 
-## 🗄️ Step 3: Database Setup
+## 🗄️ Step 3: Database & SSO Integration
 
-The database will be automatically created when you first run the backend. No manual setup required!
+**Good News!** The database (`backend/social_hub.db`) is already included in the repository with sample users, so no setup is needed!
 
-- **Database**: SQLite (automatically created as `backend/social_hub.db`)
-- **Tables**: Users table with Google OAuth support
-- **Migrations**: Handled automatically by SQLAlchemy
+### 3.1 Database Information
+
+- **Database**: SQLite (included as `backend/social_hub.db`)
+- **Location**: `backend/social_hub.db`
+- **Tables**: Users, Groups, Group Members, Chat Messages
+- **Sample Data**: Pre-populated with test users
+
+### 3.2 Single Sign-On (SSO) Integration
+
+All users in the Social Hub database are automatically synchronized with the Rocket.Chat server via SSO:
+- **Automated Sync**: Users created in Social Hub are automatically created in Rocket.Chat
+- **Unified Authentication**: Login once, access both Social Hub and Rocket.Chat
+- **No Manual Setup**: SSO handles user synchronization automatically
+- **Direct API Access**: Social Hub communicates with Rocket.Chat using REST APIs
+
+If you need to reset the database, delete `backend/social_hub.db` and the backend will automatically create a fresh one on startup.
 
 ---
 
