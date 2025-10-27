@@ -12,12 +12,6 @@ dist
 dist-ssr
 *.local
 
-# Database files (to prevent conflicts)
-*.db
-*.sqlite
-*.sqlite3
-backend/social_hub.db
-
 # Python cache
 __pycache__/
 *.pyc
