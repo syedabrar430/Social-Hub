@@ -2531,7 +2531,7 @@ def get_group_endpoint(
         raise HTTPException(status_code=500, detail=f"Failed to get group: {str(e)}")
 
 @app.put("/groups/{group_id}", response_model=GroupResponse)
-def update_group_endpoint(
+async def update_group_endpoint(
     group_id: int,
     group_data: GroupUpdate,
     current_user: User = Depends(get_current_user),
@@ -2547,7 +2547,35 @@ def update_group_endpoint(
         if group.created_by != current_user.id:
             raise HTTPException(status_code=403, detail="Access denied: Only the group creator can update the group")
         
-        # Update the group
+        # If name is being updated and we have a Rocket.Chat group ID, update it on Rocket.Chat too
+        if group_data.name and group.rocket_chat_group_id:
+            print(f"🔄 Updating group name in Rocket.Chat. Group ID: {group.rocket_chat_group_id}, New name: {group_data.name}")
+            
+            # Get user-specific headers for Rocket.Chat API calls
+            user_headers = await rocket_client.get_user_headers(
+                social_hub_user_email=current_user.email,
+                social_hub_user_name=current_user.full_name,
+                social_hub_user_id=str(current_user.id),
+                db_session=db
+            )
+            
+            # Rename the group in Rocket.Chat
+            rename_result = await rocket_client.rename_group(
+                group_id=group.rocket_chat_group_id,
+                new_name=group_data.name,
+                user_headers=user_headers
+            )
+            
+            if rename_result.get('success'):
+                print(f"✅ Successfully renamed group in Rocket.Chat to: {rename_result.get('new_name')}")
+            else:
+                error_msg = rename_result.get('error', 'Unknown error')
+                print(f"⚠️ Warning: Failed to rename group in Rocket.Chat: {error_msg}")
+                # Optionally, you can choose to raise an error here instead of continuing
+                # raise HTTPException(status_code=500, detail=f"Failed to rename group in Rocket.Chat: {error_msg}")
+                # For now, we continue with local update even if Rocket.Chat fails
+        
+        # Update the group in local database
         updated_group = update_group(db, group_id, group_data.dict(exclude_unset=True))
         if not updated_group:
             raise HTTPException(status_code=404, detail="Group not found")
@@ -2563,7 +2591,8 @@ def update_group_endpoint(
             created_by=updated_group.created_by,
             created_at=updated_group.created_at,
             members=member_responses,
-            member_count=len(member_responses)
+            member_count=len(member_responses),
+            rocket_chat_group_id=updated_group.rocket_chat_group_id
         )
     except HTTPException:
         raise
@@ -2571,7 +2600,7 @@ def update_group_endpoint(
         raise HTTPException(status_code=500, detail=f"Failed to update group: {str(e)}")
 
 @app.delete("/groups/{group_id}")
-def delete_group_endpoint(
+async def delete_group_endpoint(
     group_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -2586,14 +2615,45 @@ def delete_group_endpoint(
         if group.created_by != current_user.id:
             raise HTTPException(status_code=403, detail="Access denied: Only the group creator can delete the group")
         
+        # If the group has a Rocket.Chat group ID, delete it from Rocket.Chat first
+        if group.rocket_chat_group_id:
+            print(f"🗑️ Deleting group from Rocket.Chat. Group ID: {group.rocket_chat_group_id}")
+            
+            # Get user-specific headers for Rocket.Chat API calls
+            user_headers = await rocket_client.get_user_headers(
+                social_hub_user_email=current_user.email,
+                social_hub_user_name=current_user.full_name,
+                social_hub_user_id=str(current_user.id),
+                db_session=db
+            )
+            
+            # Delete the group from Rocket.Chat
+            delete_result = await rocket_client.delete_group(
+                group_id=group.rocket_chat_group_id,
+                user_headers=user_headers
+            )
+            
+            if delete_result.get('success'):
+                print(f"✅ Successfully deleted group from Rocket.Chat")
+            else:
+                error_msg = delete_result.get('error', 'Unknown error')
+                print(f"⚠️ Warning: Failed to delete group from Rocket.Chat: {error_msg}")
+                # Continue with local deletion even if Rocket.Chat deletion fails
+                # The group might already be deleted or not exist on Rocket.Chat
+        else:
+            print(f"ℹ️ Group has no Rocket.Chat ID, skipping Rocket.Chat deletion")
+        
+        # Delete the group from local database
         success = delete_group(db, group_id)
         if not success:
             raise HTTPException(status_code=404, detail="Group not found")
         
+        print(f"✅ Successfully deleted group from local database")
         return {"message": "Group deleted successfully"}
     except HTTPException:
         raise
     except Exception as e:
+        print(f"❌ Error deleting group: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to delete group: {str(e)}")
 
 @app.post("/groups/{group_id}/members", response_model=GroupMemberResponse)
@@ -2662,7 +2722,7 @@ async def add_member_to_group_endpoint(
         raise HTTPException(status_code=500, detail=f"Failed to add member: {str(e)}")
 
 @app.delete("/groups/{group_id}/members/{user_id}")
-def remove_member_from_group_endpoint(
+async def remove_member_from_group_endpoint(
     group_id: int,
     user_id: int,
     current_user: User = Depends(get_current_user),
@@ -2686,14 +2746,53 @@ def remove_member_from_group_endpoint(
         if group.created_by == user_id:
             raise HTTPException(status_code=400, detail="Group creator cannot remove themselves from the group")
         
+        # Get the user being removed
+        user_to_remove = get_user_by_id(db, user_id)
+        if not user_to_remove:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # If the group has a Rocket.Chat group ID, remove from Rocket.Chat first
+        if group.rocket_chat_group_id:
+            print(f"👤➖ Removing user from Rocket.Chat. Group ID: {group.rocket_chat_group_id}, User: {user_to_remove.email}")
+            
+            # Get user-specific headers for Rocket.Chat API calls
+            user_headers = await rocket_client.get_user_headers(
+                social_hub_user_email=current_user.email,
+                social_hub_user_name=current_user.full_name,
+                social_hub_user_id=str(current_user.id),
+                db_session=db
+            )
+            
+            # Get the Rocket.Chat username of the user being removed
+            rocket_username = user_to_remove.email.split('@')[0]
+            
+            # Remove the user from the Rocket.Chat group
+            remove_result = await rocket_client.remove_member_from_group(
+                group_id=group.rocket_chat_group_id,
+                username=rocket_username,
+                user_headers=user_headers
+            )
+            
+            if remove_result.get('success'):
+                print(f"✅ Successfully removed user from Rocket.Chat")
+            else:
+                error_msg = remove_result.get('error', 'Unknown error')
+                print(f"⚠️ Warning: Failed to remove user from Rocket.Chat: {error_msg}")
+                # Continue with local removal even if Rocket.Chat fails
+        else:
+            print(f"ℹ️ Group has no Rocket.Chat ID, skipping Rocket.Chat removal")
+        
+        # Remove from local database
         success = remove_member_from_group(db, group_id, user_id)
         if not success:
             raise HTTPException(status_code=404, detail="User is not a member of this group")
         
+        print(f"✅ Successfully removed user from local database")
         return {"message": "Member removed successfully"}
     except HTTPException:
         raise
     except Exception as e:
+        print(f"❌ Error removing member: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to remove member: {str(e)}")
 
 @app.get("/groups/{group_id}/members", response_model=List[GroupMemberResponse])

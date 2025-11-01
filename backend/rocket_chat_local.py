@@ -1485,6 +1485,140 @@ class RocketChatClient:
             print(f"Exception checking group existence: {e}")
             return {"exists": False, "error": str(e)}
 
+    async def rename_group(self, group_id: str, new_name: str, user_headers: Dict = None) -> Dict:
+        """Rename a group in Rocket.Chat"""
+        try:
+            print(f"✏️ Renaming group {group_id} to '{new_name}' in Rocket.Chat")
+            
+            # Convert group name to valid Rocket.Chat format (same as creation)
+            valid_name = new_name.lower().replace(' ', '-').replace('_', '-')
+            # Remove any other special characters except hyphens
+            import re
+            valid_name = re.sub(r'[^a-z0-9-]', '', valid_name)
+            # Ensure it doesn't start or end with hyphen
+            valid_name = valid_name.strip('-')
+            
+            print(f"DEBUG: Converted '{new_name}' to valid Rocket.Chat name: '{valid_name}'")
+            
+            # Use user-specific headers if provided, otherwise use admin headers
+            headers = user_headers if user_headers else self.headers
+            
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                # Use groups.rename API
+                response = await client.post(
+                    f"{self.base_url}/api/v1/groups.rename",
+                    headers=headers,
+                    json={
+                        "roomId": group_id,
+                        "name": valid_name
+                    }
+                )
+                
+                print(f"DEBUG: groups.rename API response status: {response.status_code}")
+                print(f"DEBUG: Response text: {response.text}")
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get('success'):
+                        group_info = result.get('group', {})
+                        print(f"✅ Successfully renamed group to '{valid_name}'")
+                        return {
+                            "success": True,
+                            "group": group_info,
+                            "new_name": group_info.get('name')
+                        }
+                    else:
+                        print(f"❌ Failed to rename group: {result.get('error', 'Unknown error')}")
+                        return {"success": False, "error": result.get('error', 'Unknown error')}
+                else:
+                    print(f"❌ Failed to rename group - HTTP {response.status_code}: {response.text}")
+                    return {"success": False, "error": f"HTTP {response.status_code}: {response.text}"}
+                    
+        except Exception as e:
+            print(f"Exception renaming group: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def delete_group(self, group_id: str, user_headers: Dict = None) -> Dict:
+        """Delete a group in Rocket.Chat"""
+        try:
+            print(f"🗑️ Deleting group {group_id} from Rocket.Chat")
+            
+            # Use user-specific headers if provided, otherwise use admin headers
+            headers = user_headers if user_headers else self.headers
+            
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                # Use groups.delete API
+                response = await client.post(
+                    f"{self.base_url}/api/v1/groups.delete",
+                    headers=headers,
+                    json={
+                        "roomId": group_id
+                    }
+                )
+                
+                print(f"DEBUG: groups.delete API response status: {response.status_code}")
+                print(f"DEBUG: Response text: {response.text}")
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get('success'):
+                        print(f"✅ Successfully deleted group from Rocket.Chat")
+                        return {
+                            "success": True,
+                            "message": "Group deleted successfully"
+                        }
+                    else:
+                        print(f"❌ Failed to delete group: {result.get('error', 'Unknown error')}")
+                        return {"success": False, "error": result.get('error', 'Unknown error')}
+                else:
+                    print(f"❌ Failed to delete group - HTTP {response.status_code}: {response.text}")
+                    return {"success": False, "error": f"HTTP {response.status_code}: {response.text}"}
+                    
+        except Exception as e:
+            print(f"Exception deleting group: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def remove_member_from_group(self, group_id: str, username: str, user_headers: Dict = None) -> Dict:
+        """Remove a member from a group in Rocket.Chat"""
+        try:
+            print(f"👤➖ Removing user '{username}' from group {group_id} in Rocket.Chat")
+            
+            # Use user-specific headers if provided, otherwise use admin headers
+            headers = user_headers if user_headers else self.headers
+            
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                # Use groups.kick API
+                response = await client.post(
+                    f"{self.base_url}/api/v1/groups.kick",
+                    headers=headers,
+                    json={
+                        "roomId": group_id,
+                        "username": username
+                    }
+                )
+                
+                print(f"DEBUG: groups.kick API response status: {response.status_code}")
+                print(f"DEBUG: Response text: {response.text}")
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get('success'):
+                        print(f"✅ Successfully removed user '{username}' from group")
+                        return {
+                            "success": True,
+                            "message": f"User {username} removed successfully"
+                        }
+                    else:
+                        print(f"❌ Failed to remove user: {result.get('error', 'Unknown error')}")
+                        return {"success": False, "error": result.get('error', 'Unknown error')}
+                else:
+                    print(f"❌ Failed to remove user - HTTP {response.status_code}: {response.text}")
+                    return {"success": False, "error": f"HTTP {response.status_code}: {response.text}"}
+                    
+        except Exception as e:
+            print(f"Exception removing user from group: {e}")
+            return {"success": False, "error": str(e)}
+
     async def get_rooms_list(self, user_headers: Dict = None) -> Dict:
         """Get all rooms (channels, groups, DMs) that the user is part of"""
         try:

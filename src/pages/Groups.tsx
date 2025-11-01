@@ -7,7 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Plus, Users, Search, Trash2, UserPlus, ArrowLeft, MessageCircle } from 'lucide-react';
+import { Plus, Users, Search, Trash2, UserPlus, ArrowLeft, MessageCircle, Edit, UserMinus } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useNavigate } from 'react-router-dom';
 
@@ -44,10 +44,15 @@ const Groups: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showAddMemberDialog, setShowAddMemberDialog] = useState(false);
+  const [showEditDialog, setShowEditDialog] = useState(false);
+  const [showManageMembersDialog, setShowManageMembersDialog] = useState(false);
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
+  const [groupMembers, setGroupMembers] = useState<GroupMember[]>([]);
+  const [loadingMembers, setLoadingMembers] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<User[]>([]);
   const [newGroup, setNewGroup] = useState({ name: '', description: '' });
+  const [editGroup, setEditGroup] = useState({ name: '', description: '' });
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -204,43 +209,6 @@ const Groups: React.FC = () => {
     }
   };
 
-  const removeMemberFromGroup = async (userId: number) => {
-    if (!selectedGroup) return;
-
-    try {
-      const token = localStorage.getItem('access_token');
-      const response = await fetch(`http://localhost:8000/groups/${selectedGroup.id}/members/${userId}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (response.ok) {
-        toast({
-          title: "Success",
-          description: "Member removed successfully",
-        });
-        loadGroups(); // Reload groups to update member count
-      } else {
-        const error = await response.json();
-        toast({
-          title: "Error",
-          description: error.detail || "Failed to remove member",
-          variant: "destructive",
-        });
-      }
-    } catch (error) {
-      console.error('Error removing member:', error);
-      toast({
-        title: "Error",
-        description: "Failed to remove member",
-        variant: "destructive",
-      });
-    }
-  };
-
   const deleteGroup = async (groupId: number) => {
     try {
       const token = localStorage.getItem('access_token');
@@ -276,6 +244,47 @@ const Groups: React.FC = () => {
     }
   };
 
+  const updateGroup = async () => {
+    if (!selectedGroup) return;
+
+    try {
+      const token = localStorage.getItem('access_token');
+      const response = await fetch(`http://localhost:8000/groups/${selectedGroup.id}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(editGroup),
+      });
+
+      if (response.ok) {
+        const updatedGroup = await response.json();
+        setGroups(groups.map(g => g.id === selectedGroup.id ? updatedGroup : g));
+        setShowEditDialog(false);
+        setEditGroup({ name: '', description: '' });
+        toast({
+          title: "Success",
+          description: "Group updated successfully",
+        });
+      } else {
+        const error = await response.json();
+        toast({
+          title: "Error",
+          description: error.detail || "Failed to update group",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error('Error updating group:', error);
+      toast({
+        title: "Error",
+        description: "Failed to update group",
+        variant: "destructive",
+      });
+    }
+  };
+
   const openGroupChat = (group: any) => {
     // Navigate to Messages page with the group selected
     navigate('/messages', { 
@@ -288,6 +297,79 @@ const Groups: React.FC = () => {
         }
       } 
     });
+  };
+
+  const loadGroupMembers = async (groupId: number) => {
+    setLoadingMembers(true);
+    try {
+      const token = localStorage.getItem('access_token');
+      const response = await fetch(`http://localhost:8000/groups/${groupId}/members`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setGroupMembers(data);
+      } else {
+        toast({
+          title: "Error",
+          description: "Failed to load group members",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error('Error loading group members:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load group members",
+        variant: "destructive",
+      });
+    } finally {
+      setLoadingMembers(false);
+    }
+  };
+
+  const removeMemberFromGroup = async (memberId: number) => {
+    if (!selectedGroup) return;
+
+    try {
+      const token = localStorage.getItem('access_token');
+      const response = await fetch(`http://localhost:8000/groups/${selectedGroup.id}/members/${memberId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        toast({
+          title: "Success",
+          description: "Member removed successfully",
+        });
+        // Reload members list
+        loadGroupMembers(selectedGroup.id);
+        // Reload groups to update member count
+        loadGroups();
+      } else {
+        const error = await response.json();
+        toast({
+          title: "Error",
+          description: error.detail || "Failed to remove member",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error('Error removing member:', error);
+      toast({
+        title: "Error",
+        description: "Failed to remove member",
+        variant: "destructive",
+      });
+    }
   };
 
   if (loading) {
@@ -418,7 +500,7 @@ const Groups: React.FC = () => {
                     )}
                   </div>
                   
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 flex-wrap">
                     <Button
                       size="sm"
                       onClick={() => openGroupChat(group)}
@@ -432,11 +514,35 @@ const Groups: React.FC = () => {
                       variant="outline"
                       onClick={() => {
                         setSelectedGroup(group);
+                        setEditGroup({ name: group.name, description: group.description || '' });
+                        setShowEditDialog(true);
+                      }}
+                    >
+                      <Edit className="w-4 h-4 mr-1" />
+                      Edit
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setSelectedGroup(group);
                         setShowAddMemberDialog(true);
                       }}
                     >
                       <UserPlus className="w-4 h-4 mr-1" />
                       Add Member
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setSelectedGroup(group);
+                        loadGroupMembers(group.id);
+                        setShowManageMembersDialog(true);
+                      }}
+                    >
+                      <Users className="w-4 h-4 mr-1" />
+                      Manage Members
                     </Button>
                     <Button
                       size="sm"
@@ -514,6 +620,109 @@ const Groups: React.FC = () => {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowAddMemberDialog(false)}>
               Cancel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Group Dialog */}
+      <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Group</DialogTitle>
+            <DialogDescription>
+              Update the group name and description.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="edit-group-name">Group Name</Label>
+              <Input
+                id="edit-group-name"
+                value={editGroup.name}
+                onChange={(e) => setEditGroup({ ...editGroup, name: e.target.value })}
+                placeholder="Enter group name"
+              />
+            </div>
+            <div>
+              <Label htmlFor="edit-group-description">Description (Optional)</Label>
+              <Textarea
+                id="edit-group-description"
+                value={editGroup.description}
+                onChange={(e) => setEditGroup({ ...editGroup, description: e.target.value })}
+                placeholder="Enter group description"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowEditDialog(false)}>
+              Cancel
+            </Button>
+            <Button onClick={updateGroup} disabled={!editGroup.name.trim()}>
+              Update Group
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Manage Members Dialog */}
+      <Dialog open={showManageMembersDialog} onOpenChange={setShowManageMembersDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Manage Members - {selectedGroup?.name}</DialogTitle>
+            <DialogDescription>
+              View and remove members from this group.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {loadingMembers ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="text-muted-foreground">Loading members...</div>
+              </div>
+            ) : groupMembers.length === 0 ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="text-muted-foreground">No members in this group</div>
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-96 overflow-y-auto">
+                {groupMembers.map((member) => (
+                  <div
+                    key={member.id}
+                    className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50"
+                  >
+                    <div className="flex items-center space-x-3">
+                      <Avatar className="w-10 h-10">
+                        <AvatarImage src={member.user.profile_picture_url} />
+                        <AvatarFallback>
+                          {member.user.full_name.charAt(0).toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div>
+                        <p className="font-medium">{member.user.full_name}</p>
+                        <p className="text-sm text-muted-foreground">{member.user.email}</p>
+                      </div>
+                    </div>
+                    {selectedGroup?.created_by !== member.user_id && (
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => removeMemberFromGroup(member.user_id)}
+                      >
+                        <UserMinus className="w-4 h-4 mr-1" />
+                        Remove
+                      </Button>
+                    )}
+                    {selectedGroup?.created_by === member.user_id && (
+                      <Badge variant="secondary">Creator</Badge>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowManageMembersDialog(false)}>
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>
