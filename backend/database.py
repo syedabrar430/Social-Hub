@@ -94,9 +94,29 @@ class GroupMember(Base):
     # Ensure unique user per group
     __table_args__ = ({"extend_existing": True},)
 
+# Pinned Message model
+class PinnedMessage(Base):
+    __tablename__ = "pinned_messages"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    message_id = Column(String(255), nullable=False, index=True)  # Rocket.Chat message ID
+    room_id = Column(String(255), nullable=False, index=True)  # Rocket.Chat room ID
+    room_name = Column(String(255), nullable=False)  # Room name (channel/group name)
+    room_type = Column(String(50), nullable=False)  # 'channel', 'group', or 'dm'
+    pinned_by = Column(Integer, ForeignKey("users.id"), nullable=False)  # Who pinned it
+    message_text = Column(Text, nullable=True)  # Store message text for quick display
+    pinned_at = Column(DateTime, default=datetime.utcnow, index=True)
+    
+    # Relationships
+    pinner = relationship("User", foreign_keys=[pinned_by])
+    
+    # Ensure unique message per room
+    __table_args__ = ({"extend_existing": True},)
+
 # Add relationship to User model
 User.chat_messages = relationship("ChatMessage", back_populates="user", order_by=ChatMessage.created_at)
 User.groups = relationship("GroupMember", back_populates="user")
+User.pinned_messages = relationship("PinnedMessage", foreign_keys=[PinnedMessage.pinned_by])
 
 # Create tables
 def create_tables():

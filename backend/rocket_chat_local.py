@@ -1013,6 +1013,107 @@ class RocketChatClient:
             print(f"Exception in send_thread_message: {e}")
             return {"success": False, "error": str(e)}
 
+    async def pin_message(self, message_id: str, user_headers: Dict = None) -> Dict:
+        """Pin a message in a channel or group"""
+        try:
+            print(f"DEBUG: Pinning message with ID: {message_id}")
+            
+            # Use user-specific headers if provided, otherwise use admin headers as fallback
+            headers = user_headers if user_headers else self.headers
+            
+            if user_headers:
+                print("✅ Using user-specific headers for pinning")
+            else:
+                if not await self.ensure_authenticated():
+                    return {"success": False, "error": "Authentication failed"}
+                print("⚠️ Using admin headers for pinning (fallback)")
+            
+            message_data = {
+                "messageId": message_id
+            }
+            
+            print(f"DEBUG: Pinning message with data: {message_data}")
+            print(f"DEBUG: Using headers - X-User-Id: {headers.get('X-User-Id', 'N/A')}, X-Auth-Token: {'***' if headers.get('X-Auth-Token') else 'N/A'}")
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{self.base_url}/api/v1/chat.pinMessage",
+                    json=message_data,
+                    headers=headers
+                )
+                
+                print(f"DEBUG: Pin message response status: {response.status_code}")
+                print(f"DEBUG: Pin message response: {response.text}")
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    print(f"DEBUG: Rocket.Chat result: {result}")
+                    if result.get('success'):
+                        return {"success": True, "message": result.get('message')}
+                    else:
+                        error_msg = result.get('error', 'Unknown error')
+                        print(f"❌ Rocket.Chat error: {error_msg}")
+                        return {"success": False, "error": error_msg}
+                else:
+                    error_text = response.text
+                    print(f"❌ Rocket.Chat HTTP error {response.status_code}: {error_text}")
+                    return {"success": False, "error": f"HTTP {response.status_code}: {error_text}"}
+                    
+        except Exception as e:
+            print(f"Exception in pin_message: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def unpin_message(self, message_id: str, user_headers: Dict = None) -> Dict:
+        """Unpin a message in a channel or group"""
+        try:
+            print(f"DEBUG: Unpinning message with ID: {message_id}")
+            
+            # Use user-specific headers if provided, otherwise use admin headers as fallback
+            headers = user_headers if user_headers else self.headers
+            
+            if user_headers:
+                print("✅ Using user-specific headers for unpinning")
+            else:
+                if not await self.ensure_authenticated():
+                    return {"success": False, "error": "Authentication failed"}
+                print("⚠️ Using admin headers for unpinning (fallback)")
+            
+            message_data = {
+                "messageId": message_id
+            }
+            
+            print(f"DEBUG: Unpinning message with data: {message_data}")
+            print(f"DEBUG: Using headers - X-User-Id: {headers.get('X-User-Id', 'N/A')}, X-Auth-Token: {'***' if headers.get('X-Auth-Token') else 'N/A'}")
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{self.base_url}/api/v1/chat.unPinMessage",
+                    json=message_data,
+                    headers=headers
+                )
+                
+                print(f"DEBUG: Unpin message response status: {response.status_code}")
+                print(f"DEBUG: Unpin message response: {response.text}")
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    print(f"DEBUG: Rocket.Chat result: {result}")
+                    if result.get('success'):
+                        print(f"✅ Successfully unpinned message in Rocket.Chat")
+                        return {"success": True, "message": result.get('message')}
+                    else:
+                        error_msg = result.get('error', 'Unknown error')
+                        print(f"❌ Rocket.Chat error: {error_msg}")
+                        return {"success": False, "error": error_msg}
+                else:
+                    error_text = response.text
+                    print(f"❌ Rocket.Chat HTTP error {response.status_code}: {error_text}")
+                    return {"success": False, "error": f"HTTP {response.status_code}: {error_text}"}
+                    
+        except Exception as e:
+            print(f"Exception in unpin_message: {e}")
+            return {"success": False, "error": str(e)}
+
     async def generate_sso_url(self, user_email: str, user_name: str, user_id: str) -> dict:
         """Generate SSO URL for user"""
         try:
@@ -1154,6 +1255,30 @@ class RocketChatClient:
         except Exception as e:
             print(f"Exception creating or getting DM room: {e}")
             return None
+
+    async def check_dm_has_messages(self, username: str, user_headers: Dict = None) -> bool:
+        """Check if there are any DM messages with a specific user by calling get_dm_messages"""
+        try:
+            if not user_headers:
+                print("❌ No user headers provided for DM check")
+                return False
+            
+            # Call get_dm_messages with limit 1 to check if messages exist
+            messages = await self.get_dm_messages(username, count=1, user_headers=user_headers)
+            
+            # If the list is non-empty, there are messages
+            has_messages = messages is not None and len(messages) > 0
+            
+            if has_messages:
+                print(f"✅ Found messages with {username}")
+            else:
+                print(f"⏭️  No messages with {username}")
+                
+            return has_messages
+                    
+        except Exception as e:
+            print(f"⚠️  Error checking DMs with {username}: {e}")
+            return False
 
     async def get_dm_messages(self, username: str, count: int = 50, user_headers: Dict = None) -> List[Dict]:
         """Get direct messages with a specific user with pagination to fetch all messages"""

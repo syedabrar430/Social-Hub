@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Send, Phone, Video, MoreVertical, Hash, Lock, MessageSquare, Reply, Smile, ThumbsUp, Heart, Laugh, Angry, Frown } from 'lucide-react';
+import { Send, Phone, Video, MoreVertical, Hash, Lock, MessageSquare, Reply, Smile, ThumbsUp, Heart, Laugh, Angry, Frown, Pin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -34,17 +34,21 @@ const MessageComponent: React.FC<{
   isThreadMessage?: boolean;
   onReactionToggle: (messageId: string, emoji: string) => void;
   onSendThreadMessage: (parentMessageId: string, text: string) => void;
+  onPinMessage: (messageId: string, messageText: string) => void;
   reactionEmojis: Array<{ emoji: string; icon: any; label: string }>;
   showReactionPicker: string | null;
   setShowReactionPicker: (messageId: string | null) => void;
+  isPinned?: boolean;
 }> = ({ 
   message, 
   isThreadMessage = false, 
   onReactionToggle, 
   onSendThreadMessage,
+  onPinMessage,
   reactionEmojis,
   showReactionPicker,
-  setShowReactionPicker
+  setShowReactionPicker,
+  isPinned = false
 }) => {
   const [showThreadInput, setShowThreadInput] = useState(false);
   const [threadMessage, setThreadMessage] = useState('');
@@ -145,6 +149,19 @@ const MessageComponent: React.FC<{
                   <span>({message.thread_count})</span>
                 )}
               </button>
+              
+              <button
+                onClick={() => onPinMessage(message.id, message.text || message.content || '')}
+                className={`text-xs flex items-center space-x-1 ${
+                  isPinned 
+                    ? 'text-primary hover:text-primary/80' 
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+                title={isPinned ? 'Pinned message' : 'Pin message'}
+              >
+                <Pin className={`h-3 w-3 ${isPinned ? 'fill-current' : ''}`} />
+                <span>{isPinned ? 'Pinned' : 'Pin'}</span>
+              </button>
             </div>
           )}
         </div>
@@ -212,6 +229,7 @@ const MessageComponent: React.FC<{
               isThreadMessage={true}
               onReactionToggle={onReactionToggle}
               onSendThreadMessage={onSendThreadMessage}
+              onPinMessage={() => {}}
               reactionEmojis={reactionEmojis}
               showReactionPicker={showReactionPicker}
               setShowReactionPicker={setShowReactionPicker}
@@ -512,6 +530,49 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedChannel, isAuthenticate
     }
   };
 
+  const handlePinMessage = async (messageId: string, messageText: string) => {
+    try {
+      const roomId = selectedChannel.id;
+      const roomName = selectedChannel.name || selectedChannel.display_name || '';
+      const roomType = selectedChannel.type === 'private_group' ? 'group' : 'channel';
+      
+      console.log('📌 Pinning message:', { messageId, roomId, roomName, roomType });
+      
+      const response = await fetch('http://localhost:8000/chat/pin-message', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+        },
+        body: JSON.stringify({
+          message_id: messageId,
+          room_id: roomId,
+          room_name: roomName,
+          room_type: roomType,
+          message_text: messageText
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to pin message');
+      }
+      
+      toast({
+        title: "Message pinned!",
+        description: "The message has been pinned successfully",
+      });
+      
+      // Reload messages to update pinned status
+      await loadMessages();
+    } catch (error) {
+      console.error('Failed to pin message:', error);
+      toast({
+        title: "Error",
+        description: "Failed to pin message",
+        variant: "destructive",
+      });
+    }
+  };
 
   const isPrivate = selectedChannel.type === 'private_group' || selectedChannel.is_private;
   const channelDisplayName = selectedChannel.display_name || selectedChannel.name;
@@ -600,6 +661,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ selectedChannel, isAuthenticate
                     isThreadMessage={false}
                     onReactionToggle={handleReactionToggle}
                     onSendThreadMessage={handleSendThreadMessage}
+                    onPinMessage={handlePinMessage}
                     reactionEmojis={reactionEmojis}
                     showReactionPicker={showReactionPicker}
                     setShowReactionPicker={setShowReactionPicker}

@@ -9,7 +9,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { type ChatConversation, type ChatMessage } from '@/services/chat';
 import { chatService as rocketChatService } from '@/services/chat';
 import { useToast } from '@/hooks/use-toast';
-import { Hash, Lock, MessageCircle, Users, User, Search, Send, Smile, Reply, Paperclip, Image, File, Mic, Video, MoreHorizontal, UserPlus } from 'lucide-react';
+import { Hash, Lock, MessageCircle, Users, User, Search, Send, Smile, Reply, Paperclip, Image, File, Mic, Video, MoreHorizontal, UserPlus, Pin } from 'lucide-react';
 import { UserSearch } from './UserSearch';
 import { UserSearchResult } from '@/services/api';
 
@@ -48,6 +48,10 @@ const EnhancedMessagesWidget: React.FC<EnhancedMessagesWidgetProps> = ({ openGro
   
   // Tab navigation state
   const [activeTab, setActiveTab] = useState<'all' | 'groups' | 'dms'>('all');
+  
+  // Pinned messages state
+  const [pinnedMessages, setPinnedMessages] = useState<ChatMessage[]>([]);
+  const [pinnedMessageIds, setPinnedMessageIds] = useState<Set<string>>(new Set());
   
   // Chat data state
   const [channels, setChannels] = useState<ChatConversation[]>([]);
@@ -259,6 +263,43 @@ const EnhancedMessagesWidget: React.FC<EnhancedMessagesWidgetProps> = ({ openGro
     }
   };
 
+  // Load pinned messages for a conversation
+  const loadPinnedMessages = async (roomId: string) => {
+    if (!roomId) return;
+    
+    try {
+      const response = await fetch(`http://localhost:8000/chat/pinned-messages?room_id=${roomId}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log('📌 Loaded pinned messages:', data);
+        
+        if (data.pinned_messages && Array.isArray(data.pinned_messages)) {
+          // Convert pinned messages to ChatMessage format
+          const pinnedMsgs: ChatMessage[] = data.pinned_messages.map((pm: any) => ({
+            id: pm.message_id,
+            text: pm.message_text,
+            content: pm.message_text,
+            sender: 'System',
+            timestamp: pm.pinned_at,
+            user: { username: 'system', name: 'System' },
+            reactions: {},
+            thread_count: 0
+          }));
+          
+          setPinnedMessages(pinnedMsgs);
+          setPinnedMessageIds(new Set(data.pinned_messages.map((pm: any) => pm.message_id)));
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load pinned messages:', error);
+    }
+  };
+
   const handleConversationSelect = async (conversation: ChatConversation) => {
     console.log('Selecting conversation:', conversation);
     setSelectedConversation(conversation);
@@ -284,6 +325,9 @@ const EnhancedMessagesWidget: React.FC<EnhancedMessagesWidgetProps> = ({ openGro
       }
       
       console.log('Loaded messages count:', conversationMessages.length);
+      
+      // Load pinned messages for this conversation
+      loadPinnedMessages(conversation.id);
       
       // Debug: Check which messages are thread messages
       const threadMessages = conversationMessages.filter(msg => msg.is_thread_message);
@@ -1139,6 +1183,89 @@ const EnhancedMessagesWidget: React.FC<EnhancedMessagesWidgetProps> = ({ openGro
                   </div>
                 </div>
 
+                {/* Pinned Messages Header */}
+                {pinnedMessages.length > 0 && (
+                  <div className="border-b bg-blue-50 p-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Pin className="h-4 w-4 text-blue-600 fill-current" />
+                      <span className="text-sm font-semibold text-blue-900">
+                        Pinned Messages ({pinnedMessages.length})
+                      </span>
+                    </div>
+                    <ScrollArea className="max-h-48 overflow-y-auto">
+                      <div className="space-y-2 pr-4">
+                        {pinnedMessages.map((pinnedMsg) => (
+                          <div 
+                            key={pinnedMsg.id}
+                            className="bg-white rounded-md p-2 text-sm border border-blue-200"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-gray-800 truncate">{pinnedMsg.text}</p>
+                                <p className="text-xs text-gray-500 mt-1">
+                                  Pinned {new Date(pinnedMsg.timestamp).toLocaleDateString()}
+                                </p>
+                              </div>
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    const response = await fetch('http://localhost:8000/chat/unpin-message', {
+                                      method: 'POST',
+                                      headers: {
+                                        'Content-Type': 'application/json',
+                                        'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+                                      },
+                                      body: JSON.stringify({
+                                        message_id: pinnedMsg.id,
+                                        room_id: selectedConversation?.id
+                                      })
+                                    });
+                                    
+                                    const data = await response.json();
+                                    
+                                    if (response.ok && data.success) {
+                                      toast({
+                                        title: "Message unpinned!",
+                                        description: data.message || "Message has been unpinned successfully",
+                                      });
+                                      
+                                      // Immediately remove from pinned messages array
+                                      setPinnedMessages(prev => prev.filter(msg => msg.id !== pinnedMsg.id));
+                                      
+                                      // Remove from pinned set
+                                      setPinnedMessageIds(prev => {
+                                        const newSet = new Set(prev);
+                                        newSet.delete(pinnedMsg.id);
+                                        return newSet;
+                                      });
+                                      
+                                      // Reload pinned messages to sync with server
+                                      loadPinnedMessages(selectedConversation?.id || '');
+                                    } else {
+                                      throw new Error(data.message || 'Failed to unpin message');
+                                    }
+                                  } catch (error) {
+                                    console.error('Failed to unpin:', error);
+                                    toast({
+                                      title: "Error",
+                                      description: error instanceof Error ? error.message : "Failed to unpin message",
+                                      variant: "destructive",
+                                    });
+                                  }
+                                }}
+                                className="text-gray-400 hover:text-red-600 transition-colors flex-shrink-0"
+                                title="Unpin message"
+                              >
+                                <Pin className="h-4 w-4 fill-current" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </ScrollArea>
+                  </div>
+                )}
+
                 {/* Messages Area */}
                 <ScrollArea className="flex-1 overflow-y-auto p-4 scrollbar-hide min-h-0 max-h-full">
                   <div className="space-y-4 pb-4">
@@ -1454,6 +1581,111 @@ const EnhancedMessagesWidget: React.FC<EnhancedMessagesWidgetProps> = ({ openGro
                                               {message.thread_count}
                                             </span>
                                           )}
+                                        </button>
+                                        
+                                        {/* Pin/Unpin button */}
+                                        <button
+                                          onClick={async () => {
+                                            const isCurrentlyPinned = pinnedMessageIds.has(message.id);
+                                            
+                                            try {
+                                              const roomId = selectedConversation?.id || '';
+                                              const roomName = selectedConversation?.name || selectedConversation?.display_name || '';
+                                              
+                                              if (isCurrentlyPinned) {
+                                                // Unpin the message
+                                                console.log('📌 Unpinning message:', { messageId: message.id, roomId });
+                                                
+                                                const response = await fetch('http://localhost:8000/chat/unpin-message', {
+                                                  method: 'POST',
+                                                  headers: {
+                                                    'Content-Type': 'application/json',
+                                                    'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+                                                  },
+                                                  body: JSON.stringify({
+                                                    message_id: message.id,
+                                                    room_id: roomId
+                                                  })
+                                                });
+                                                
+                                                const data = await response.json();
+                                                
+                                                if (!response.ok || !data.success) {
+                                                  throw new Error(data.message || 'Failed to unpin message');
+                                                }
+                                                
+                                                toast({
+                                                  title: "Message unpinned!",
+                                                  description: data.message || "The message has been unpinned successfully",
+                                                });
+                                                
+                                                // Remove from pinned messages set
+                                                setPinnedMessageIds(prev => {
+                                                  const newSet = new Set(prev);
+                                                  newSet.delete(message.id);
+                                                  return newSet;
+                                                });
+                                                
+                                                // Reload pinned messages to update the header
+                                                if (selectedConversation) {
+                                                  loadPinnedMessages(selectedConversation.id);
+                                                }
+                                              } else {
+                                                // Pin the message
+                                                const roomType = selectedConversation?.type === 'private_group' ? 'group' : 'channel';
+                                                console.log('📌 Pinning message:', { messageId: message.id, roomId, roomName, roomType });
+                                                
+                                                const response = await fetch('http://localhost:8000/chat/pin-message', {
+                                                  method: 'POST',
+                                                  headers: {
+                                                    'Content-Type': 'application/json',
+                                                    'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+                                                  },
+                                                  body: JSON.stringify({
+                                                    message_id: message.id,
+                                                    room_id: roomId,
+                                                    room_name: roomName,
+                                                    room_type: roomType,
+                                                    message_text: message.text || message.content || ''
+                                                  })
+                                                });
+                                                
+                                                const data = await response.json();
+                                                
+                                                if (!response.ok || !data.success) {
+                                                  throw new Error(data.message || 'Failed to pin message');
+                                                }
+                                                
+                                                toast({
+                                                  title: "Message pinned!",
+                                                  description: data.message || "The message has been pinned successfully",
+                                                });
+                                                
+                                                // Add to pinned messages set
+                                                setPinnedMessageIds(prev => new Set(prev).add(message.id));
+                                                
+                                                // Reload pinned messages
+                                                if (selectedConversation) {
+                                                  loadPinnedMessages(selectedConversation.id);
+                                                }
+                                              }
+                                            } catch (error) {
+                                              console.error(`Failed to ${isCurrentlyPinned ? 'unpin' : 'pin'} message:`, error);
+                                              toast({
+                                                title: "Error",
+                                                description: error instanceof Error ? error.message : `Failed to ${isCurrentlyPinned ? 'unpin' : 'pin'} message`,
+                                                variant: "destructive",
+                                              });
+                                            }
+                                          }}
+                                          className={`flex items-center justify-center w-6 h-6 rounded-full transition-colors ${
+                                            pinnedMessageIds.has(message.id)
+                                              ? 'bg-blue-100 hover:bg-blue-200 text-blue-600'
+                                              : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
+                                          }`}
+                                          title={pinnedMessageIds.has(message.id) ? "Click to unpin message" : "Click to pin message"}
+                                        >
+                                          <Pin className={`h-4 w-4 ${pinnedMessageIds.has(message.id) ? 'fill-current' : ''}`} />
                                         </button>
                                       </div>
                                     </div>

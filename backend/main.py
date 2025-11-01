@@ -13,7 +13,7 @@ from pathlib import Path
 from google.oauth2 import id_token
 from google.auth.transport import requests
 
-from database import get_db, create_tables, User, ChatMessage, Group, GroupMember
+from database import get_db, create_tables, User, ChatMessage, Group, GroupMember, PinnedMessage
 from schemas import UserRegistration, UserLogin, UserResponse, Token, Message, GoogleAuthRequest, UserProfileUpdate, ChatMessageCreate, ChatMessageResponse, GroupCreate, GroupUpdate, GroupMemberAdd, GroupMemberRemove, GroupResponse, GroupMemberResponse, UserSearchResponse
 from crud import create_user, authenticate_user, get_user_by_email, get_user_by_id, create_google_user, get_user_by_google_id, create_chat_message, get_recent_chat_messages, create_group, get_group_by_id, get_user_groups, add_member_to_group, remove_member_from_group, get_group_members, search_users, is_user_in_group, update_group, delete_group
 from auth import create_access_token, verify_token, ACCESS_TOKEN_EXPIRE_MINUTES
@@ -417,11 +417,17 @@ async def get_channel_messages(
             try:
                 if not isinstance(msg, dict):
                     continue
+                
+                # Skip messages with empty text
+                message_text = msg.get("msg", "")
+                if not message_text or message_text.strip() == "":
+                    print(f"DEBUG: Skipping message with empty text: {msg.get('_id')}")
+                    continue
                     
                 user_data = msg.get("u", {})
                 formatted_message = {
                     "id": msg.get("_id", ""),
-                    "text": msg.get("msg", ""),
+                    "text": message_text,
                     "user": {
                         "id": user_data.get("_id", "unknown"),
                         "username": user_data.get("username", "Unknown"),
@@ -440,6 +446,244 @@ async def get_channel_messages(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Get messages failed: {str(e)}")
+
+@app.get("/chat/group-messages")
+async def get_group_messages(
+    group_name: str,
+    limit: int = 100,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get messages from a private group"""
+    try:
+        print(f"DEBUG: Fetching messages from group '{group_name}' for user: {current_user.email}")
+        
+        # Get user-specific headers for API calls
+        user_headers = await rocket_client.get_user_headers(
+            social_hub_user_email=current_user.email,
+            social_hub_user_name=current_user.full_name,
+            social_hub_user_id=str(current_user.id),
+            db_session=db
+        )
+        
+        messages = await rocket_client.get_channel_messages(
+            group_name, 
+            count=limit, 
+            channel_type='group',
+            user_headers=user_headers
+        )
+        
+        print(f"DEBUG: Got {len(messages)} messages from group '{group_name}'")
+        
+        # Transform messages for frontend
+        formatted_messages = []
+        for msg in messages:
+            try:
+                if not isinstance(msg, dict):
+                    continue
+                
+                # Skip messages with empty text
+                message_text = msg.get("msg", "")
+                if not message_text or message_text.strip() == "":
+                    print(f"DEBUG: Skipping message with empty text: {msg.get('_id')}")
+                    continue
+                    
+                user_data = msg.get("u", {})
+                formatted_message = {
+                    "id": msg.get("_id", ""),
+                    "text": message_text,
+                    "user": {
+                        "id": user_data.get("_id", "unknown"),
+                        "username": user_data.get("username", "Unknown"),
+                        "name": user_data.get("name") or user_data.get("username", "Unknown User")
+                    },
+                    "timestamp": msg.get("ts", ""),
+                    "edited_at": msg.get("_updatedAt") if msg.get("_updatedAt") else None,
+                    "reactions": msg.get("reactions", {}),
+                    "thread_count": msg.get("tcount", 0),
+                    "thread_ts": msg.get("tmid")
+                }
+                formatted_messages.append(formatted_message)
+            except Exception as e:
+                print(f"DEBUG: Error formatting message: {e}")
+                continue
+        
+        return {"messages": formatted_messages}
+        
+    except Exception as e:
+        print(f"ERROR: Failed to get group messages: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Get group messages failed: {str(e)}")
+
+@app.post("/chat/pin-message")
+async def pin_message(
+    message_data: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Pin a message in a channel or group"""
+    try:
+        message_id = message_data.get("message_id")
+        room_id = message_data.get("room_id")
+        room_name = message_data.get("room_name")
+        room_type = message_data.get("room_type", "channel")  # 'channel', 'group', or 'dm'
+        message_text = message_data.get("message_text", "")
+        
+        if not message_id:
+            raise HTTPException(status_code=400, detail="message_id is required")
+        if not room_id or not room_name:
+            raise HTTPException(status_code=400, detail="room_id and room_name are required")
+        
+        print(f"DEBUG: Pinning message {message_id} in {room_type} '{room_name}' for user: {current_user.email}")
+        
+        # Get user-specific headers for API calls
+        user_headers = await rocket_client.get_user_headers(
+            social_hub_user_email=current_user.email,
+            social_hub_user_name=current_user.full_name,
+            social_hub_user_id=str(current_user.id),
+            db_session=db
+        )
+        
+        # Try to pin in Rocket.Chat (optional - may fail due to permissions)
+        rocket_result = await rocket_client.pin_message(message_id, user_headers=user_headers)
+        rocket_pinned = rocket_result.get('success', False)
+        
+        if not rocket_pinned:
+            print(f"⚠️ Rocket.Chat pin failed (permissions issue): {rocket_result.get('error')}")
+            print(f"✅ Will still save to Social Hub database")
+        else:
+            print(f"✅ Successfully pinned in Rocket.Chat")
+        
+        # Always save to Social Hub database (independent of Rocket.Chat permissions)
+        existing_pin = db.query(PinnedMessage).filter(
+            PinnedMessage.message_id == message_id,
+            PinnedMessage.room_id == room_id
+        ).first()
+        
+        if not existing_pin:
+            pinned_message = PinnedMessage(
+                message_id=message_id,
+                room_id=room_id,
+                room_name=room_name,
+                room_type=room_type,
+                pinned_by=current_user.id,
+                message_text=message_text
+            )
+            db.add(pinned_message)
+            db.commit()
+            print(f"✅ Saved pinned message to Social Hub database")
+        else:
+            print(f"ℹ️ Message already pinned in database")
+        
+        # Return success if saved to Social Hub (regardless of Rocket.Chat)
+        return {
+            "success": True, 
+            "message": "Message pinned successfully in Social Hub",
+            "rocket_chat_pinned": rocket_pinned
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ERROR: Failed to pin message: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Pin message failed: {str(e)}")
+
+@app.post("/chat/unpin-message")
+async def unpin_message(
+    message_data: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Unpin a message in a channel or group"""
+    try:
+        message_id = message_data.get("message_id")
+        room_id = message_data.get("room_id")
+        
+        if not message_id:
+            raise HTTPException(status_code=400, detail="message_id is required")
+        
+        print(f"DEBUG: Unpinning message {message_id} for user: {current_user.email}")
+        
+        # Get user-specific headers for API calls
+        user_headers = await rocket_client.get_user_headers(
+            social_hub_user_email=current_user.email,
+            social_hub_user_name=current_user.full_name,
+            social_hub_user_id=str(current_user.id),
+            db_session=db
+        )
+        
+        # Try to unpin in Rocket.Chat (optional - may fail due to permissions)
+        rocket_result = await rocket_client.unpin_message(message_id, user_headers=user_headers)
+        rocket_unpinned = rocket_result.get('success', False)
+        
+        if not rocket_unpinned:
+            print(f"⚠️ Rocket.Chat unpin failed (permissions issue): {rocket_result.get('error')}")
+            print(f"✅ Will still remove from Social Hub database")
+        else:
+            print(f"✅ Successfully unpinned in Rocket.Chat")
+        
+        # Always remove from Social Hub database (independent of Rocket.Chat permissions)
+        if room_id:
+            pinned_message = db.query(PinnedMessage).filter(
+                PinnedMessage.message_id == message_id,
+                PinnedMessage.room_id == room_id
+            ).first()
+        else:
+            pinned_message = db.query(PinnedMessage).filter(
+                PinnedMessage.message_id == message_id
+            ).first()
+        
+        if pinned_message:
+            db.delete(pinned_message)
+            db.commit()
+            print(f"✅ Removed pinned message from Social Hub database")
+        else:
+            print(f"ℹ️ Message was not found in pinned messages database")
+        
+        # Return success if removed from Social Hub (regardless of Rocket.Chat)
+        return {
+            "success": True, 
+            "message": "Message unpinned successfully from Social Hub",
+            "rocket_chat_unpinned": rocket_unpinned
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ERROR: Failed to unpin message: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Unpin message failed: {str(e)}")
+
+@app.get("/chat/pinned-messages")
+async def get_pinned_messages(
+    room_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get all pinned messages for a room"""
+    try:
+        print(f"DEBUG: Getting pinned messages for room {room_id}")
+        
+        pinned_messages = db.query(PinnedMessage).filter(
+            PinnedMessage.room_id == room_id
+        ).order_by(PinnedMessage.pinned_at.desc()).all()
+        
+        return {
+            "pinned_messages": [
+                {
+                    "id": pm.id,
+                    "message_id": pm.message_id,
+                    "room_id": pm.room_id,
+                    "room_name": pm.room_name,
+                    "room_type": pm.room_type,
+                    "message_text": pm.message_text,
+                    "pinned_by": pm.pinned_by,
+                    "pinned_at": pm.pinned_at.isoformat() if pm.pinned_at else None
+                }
+                for pm in pinned_messages
+            ]
+        }
+    except Exception as e:
+        print(f"ERROR: Failed to get pinned messages: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Get pinned messages failed: {str(e)}")
 
 @app.get("/chat/thread-messages")
 async def get_thread_messages(
@@ -1050,7 +1294,7 @@ async def get_complete_dm_list(current_user: User = Depends(get_current_user), d
 
 @app.get("/api/rocket-chat/dm-list")
 async def get_dm_list(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Get all DM conversations"""
+    """Get all DM conversations by checking each user in database"""
     try:
         print(f"DEBUG: Fetching DM list for user: {current_user.email}")
         
@@ -1076,9 +1320,48 @@ async def get_dm_list(current_user: User = Depends(get_current_user), db: Sessio
                 detail="Failed to get user authentication. Please check your credentials."
             )
         
-        # Use user-specific headers to get rooms
-        rooms = await rocket_client.get_all_user_rooms(user_headers=user_headers)
-        return {"dms": rooms['direct_messages']}
+        # Get all users from database except current user
+        all_users = db.query(User).filter(User.id != current_user.id, User.is_active == True).all()
+        print(f"DEBUG: Found {len(all_users)} users in database")
+        
+        dm_list = []
+        
+        # Check each user for DM messages
+        for user in all_users:
+            try:
+                # Extract username from email (part before @)
+                username = user.email.split('@')[0]
+                
+                # Use the new efficient function to check if messages exist
+                has_messages = await rocket_client.check_dm_has_messages(username, user_headers=user_headers)
+                
+                # If there's at least one message, add to DM list
+                if has_messages:
+                    print(f"✅ Adding {user.full_name} ({username}) to DM list")
+                    
+                    dm_list.append({
+                        "id": f"dm_{user.id}",
+                        "name": username,
+                        "display_name": user.full_name,
+                        "other_user": username,
+                        "other_user_id": user.id,
+                        "other_user_email": user.email,
+                        "profile_picture_url": user.profile_picture_url,
+                        "unread_count": 0,  # We don't track unread in this simple implementation
+                        "last_message": "",  # Will be loaded when conversation is opened
+                        "last_message_time": "",
+                        "type": "direct_message"
+                    })
+                else:
+                    print(f"⏭️  Skipping {user.full_name} ({username}) - no messages")
+                    
+            except Exception as e:
+                print(f"⚠️  Error checking DMs with {user.email}: {e}")
+                continue
+        
+        print(f"DEBUG: Returning {len(dm_list)} DM conversations")
+        return {"dms": dm_list}
+        
     except HTTPException:
         raise
     except Exception as e:
@@ -2600,7 +2883,7 @@ async def update_group_endpoint(
         raise HTTPException(status_code=500, detail=f"Failed to update group: {str(e)}")
 
 @app.delete("/groups/{group_id}")
-async def delete_group_endpoint(
+async def delete_group_endpoint(    
     group_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
