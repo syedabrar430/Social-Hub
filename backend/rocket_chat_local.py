@@ -1114,6 +1114,58 @@ class RocketChatClient:
             print(f"Exception in unpin_message: {e}")
             return {"success": False, "error": str(e)}
 
+    async def delete_message(self, message_id: str, room_id: str, user_headers: Dict = None) -> Dict:
+        """Delete a message in a channel or group"""
+        try:
+            print(f"DEBUG: Deleting message with ID: {message_id} in room: {room_id}")
+            
+            # Use user-specific headers if provided, otherwise use admin headers as fallback
+            headers = user_headers if user_headers else self.headers
+            
+            if user_headers:
+                print("✅ Using user-specific headers for deleting message")
+            else:
+                if not await self.ensure_authenticated():
+                    return {"success": False, "error": "Authentication failed"}
+                print("⚠️ Using admin headers for deleting message (fallback)")
+            
+            message_data = {
+                "roomId": room_id,
+                "msgId": message_id
+            }
+            
+            print(f"DEBUG: Deleting message with data: {message_data}")
+            print(f"DEBUG: Using headers - X-User-Id: {headers.get('X-User-Id', 'N/A')}, X-Auth-Token: {'***' if headers.get('X-Auth-Token') else 'N/A'}")
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{self.base_url}/api/v1/chat.delete",
+                    json=message_data,
+                    headers=headers
+                )
+                
+                print(f"DEBUG: Delete message response status: {response.status_code}")
+                print(f"DEBUG: Delete message response: {response.text}")
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    print(f"DEBUG: Rocket.Chat result: {result}")
+                    if result.get('success'):
+                        print(f"✅ Successfully deleted message in Rocket.Chat")
+                        return {"success": True, "message": "Message deleted successfully"}
+                    else:
+                        error_msg = result.get('error', 'Unknown error')
+                        print(f"❌ Rocket.Chat error: {error_msg}")
+                        return {"success": False, "error": error_msg}
+                else:
+                    error_text = response.text
+                    print(f"❌ Rocket.Chat HTTP error {response.status_code}: {error_text}")
+                    return {"success": False, "error": f"HTTP {response.status_code}: {error_text}"}
+                    
+        except Exception as e:
+            print(f"Exception in delete_message: {e}")
+            return {"success": False, "error": str(e)}
+
     async def generate_sso_url(self, user_email: str, user_name: str, user_id: str) -> dict:
         """Generate SSO URL for user"""
         try:

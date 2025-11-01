@@ -652,6 +652,68 @@ async def unpin_message(
         print(f"ERROR: Failed to unpin message: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Unpin message failed: {str(e)}")
 
+@app.delete("/chat/delete-message")
+async def delete_message(
+    message_data: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Delete a message from a channel or group"""
+    try:
+        message_id = message_data.get("message_id")
+        room_id = message_data.get("room_id")
+        
+        if not message_id:
+            raise HTTPException(status_code=400, detail="message_id is required")
+        if not room_id:
+            raise HTTPException(status_code=400, detail="room_id is required")
+        
+        print(f"DEBUG: Deleting message {message_id} from room {room_id} for user: {current_user.email}")
+        
+        # Get user-specific headers for API calls
+        user_headers = await rocket_client.get_user_headers(
+            social_hub_user_email=current_user.email,
+            social_hub_user_name=current_user.full_name,
+            social_hub_user_id=str(current_user.id),
+            db_session=db
+        )
+        
+        # Delete message in Rocket.Chat
+        result = await rocket_client.delete_message(message_id, room_id, user_headers=user_headers)
+        
+        if result.get('success'):
+            # Also remove from pinned messages if it was pinned
+            pinned_message = db.query(PinnedMessage).filter(
+                PinnedMessage.message_id == message_id,
+                PinnedMessage.room_id == room_id
+            ).first()
+            
+            if pinned_message:
+                db.delete(pinned_message)
+                db.commit()
+                print(f"✅ Also removed from pinned messages database")
+            
+            return {
+                "success": True, 
+                "message": result.get('message', 'Message deleted successfully')
+            }
+        else:
+            # Check for specific error types and provide user-friendly messages
+            error_msg = result.get('error', 'Failed to delete message')
+            
+            if 'error-action-not-allowed' in error_msg or 'Not allowed' in error_msg:
+                raise HTTPException(status_code=403, detail="Cannot delete other users' messages")
+            elif 'not-authorized' in error_msg.lower() or 'not authorized' in error_msg.lower():
+                raise HTTPException(status_code=403, detail="You don't have permission to delete this message")
+            else:
+                raise HTTPException(status_code=500, detail=error_msg)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ERROR: Failed to delete message: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Delete message failed: {str(e)}")
+
 @app.get("/chat/pinned-messages")
 async def get_pinned_messages(
     room_id: str,

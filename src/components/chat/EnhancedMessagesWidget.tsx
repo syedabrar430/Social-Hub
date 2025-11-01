@@ -9,7 +9,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { type ChatConversation, type ChatMessage } from '@/services/chat';
 import { chatService as rocketChatService } from '@/services/chat';
 import { useToast } from '@/hooks/use-toast';
-import { Hash, Lock, MessageCircle, Users, User, Search, Send, Smile, Reply, Paperclip, Image, File, Mic, Video, MoreHorizontal, UserPlus, Pin } from 'lucide-react';
+import { Hash, Lock, MessageCircle, Users, User, Search, Send, Smile, Reply, Paperclip, Image, File, Mic, Video, MoreHorizontal, UserPlus, Pin, Trash2 } from 'lucide-react';
 import { UserSearch } from './UserSearch';
 import { UserSearchResult } from '@/services/api';
 
@@ -1589,8 +1589,19 @@ const EnhancedMessagesWidget: React.FC<EnhancedMessagesWidgetProps> = ({ openGro
                                             const isCurrentlyPinned = pinnedMessageIds.has(message.id);
                                             
                                             try {
-                                              const roomId = selectedConversation?.id || '';
+                                              // Use rocket_chat_group_id if available (for groups), otherwise use conversation id
+                                              let roomId = selectedConversation?.id || '';
                                               const roomName = selectedConversation?.name || selectedConversation?.display_name || '';
+                                              
+                                              // For private groups, prefer rocket_chat_group_id from the conversation
+                                              if (selectedConversation?.type === 'private_group') {
+                                                const group = groups.find(g => g.id === selectedConversation.id || g.name === selectedConversation.name);
+                                                if (group && (group as any).rocket_chat_group_id) {
+                                                  roomId = (group as any).rocket_chat_group_id;
+                                                } else if ((selectedConversation as any).rocket_chat_group_id) {
+                                                  roomId = (selectedConversation as any).rocket_chat_group_id;
+                                                }
+                                              }
                                               
                                               if (isCurrentlyPinned) {
                                                 // Unpin the message
@@ -1687,6 +1698,105 @@ const EnhancedMessagesWidget: React.FC<EnhancedMessagesWidgetProps> = ({ openGro
                                         >
                                           <Pin className={`h-4 w-4 ${pinnedMessageIds.has(message.id) ? 'fill-current' : ''}`} />
                                         </button>
+                                        
+                                        {/* Delete button */}
+                                        <button
+                                          onClick={async () => {
+                                              if (!confirm('Are you sure you want to delete this message? This action cannot be undone.')) {
+                                                return;
+                                              }
+                                              
+                                              try {
+                                                // Use rocket_chat_group_id if available (for groups), otherwise use conversation id
+                                                let roomId = selectedConversation?.id || '';
+                                                
+                                                // For private groups, prefer rocket_chat_group_id from the conversation
+                                                if (selectedConversation?.type === 'private_group') {
+                                                  const group = groups.find(g => g.id === selectedConversation.id || g.name === selectedConversation.name);
+                                                  if (group && (group as any).rocket_chat_group_id) {
+                                                    roomId = (group as any).rocket_chat_group_id;
+                                                  } else if ((selectedConversation as any).rocket_chat_group_id) {
+                                                    roomId = (selectedConversation as any).rocket_chat_group_id;
+                                                  }
+                                                }
+                                                
+                                                console.log('🗑️ Deleting message:', { messageId: message.id, roomId, conversation: selectedConversation });
+                                                
+                                                const response = await fetch('http://localhost:8000/chat/delete-message', {
+                                                  method: 'DELETE',
+                                                  headers: {
+                                                    'Content-Type': 'application/json',
+                                                    'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+                                                  },
+                                                  body: JSON.stringify({
+                                                    message_id: message.id,
+                                                    room_id: roomId
+                                                  })
+                                                });
+                                                
+                                                const data = await response.json();
+                                                
+                                                if (!response.ok || !data.success) {
+                                                  throw new Error(data.message || data.detail || 'Failed to delete message');
+                                                }
+                                                
+                                                toast({
+                                                  title: "Message deleted!",
+                                                  description: "The message has been deleted successfully",
+                                                });
+                                                
+                                                // Remove from messages array
+                                                setMessages(prev => prev.filter(msg => msg.id !== message.id));
+                                                
+                                                // Remove from pinned messages if it was pinned
+                                                if (pinnedMessageIds.has(message.id)) {
+                                                  setPinnedMessageIds(prev => {
+                                                    const newSet = new Set(prev);
+                                                    newSet.delete(message.id);
+                                                    return newSet;
+                                                  });
+                                                  
+                                                  // Remove from pinned messages array
+                                                  setPinnedMessages(prev => prev.filter(msg => msg.id !== message.id));
+                                                  
+                                                  // Reload pinned messages
+                                                  if (selectedConversation) {
+                                                    loadPinnedMessages(selectedConversation.id);
+                                                  }
+                                                }
+                                              } catch (error) {
+                                                console.error('Failed to delete message:', error);
+                                                
+                                                // Parse error message to provide user-friendly feedback
+                                                let errorMessage = "Failed to delete message";
+                                                
+                                                if (error instanceof Error) {
+                                                  const errorText = error.message.toLowerCase();
+                                                  
+                                                  // Check for common error scenarios
+                                                  if (errorText.includes('not allowed') || errorText.includes('error-action-not-allowed')) {
+                                                    errorMessage = "Cannot delete other users' messages. You can only delete your own messages.";
+                                                  } else if (errorText.includes('not authorized') || errorText.includes('unauthorized')) {
+                                                    errorMessage = "You don't have permission to delete this message.";
+                                                  } else if (errorText.includes('not found')) {
+                                                    errorMessage = "Message not found or already deleted.";
+                                                  } else {
+                                                    errorMessage = error.message;
+                                                  }
+                                                }
+                                                
+                                                toast({
+                                                  title: "Cannot Delete Message",
+                                                  description: errorMessage,
+                                                  variant: "destructive",
+                                                });
+                                              }
+                                            }}
+                                            className="flex items-center justify-center w-6 h-6 rounded-full bg-gray-100 hover:bg-red-100 text-gray-600 hover:text-red-600 transition-colors"
+                                            title="Delete message"
+                                          >
+                                            <Trash2 className="h-4 w-4" />
+                                          </button>
                                       </div>
                                     </div>
                                   )}
