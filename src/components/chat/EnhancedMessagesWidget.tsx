@@ -268,7 +268,9 @@ const EnhancedMessagesWidget: React.FC<EnhancedMessagesWidgetProps> = ({ openGro
     if (!roomId) return;
     
     try {
-      const response = await fetch(`http://localhost:8000/chat/pinned-messages?room_id=${roomId}`, {
+      console.log('📌 Loading pinned messages with room_id:', roomId);
+      
+      const response = await fetch(`http://localhost:8000/chat/pinned-messages?room_id=${encodeURIComponent(roomId)}`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`
         }
@@ -327,7 +329,11 @@ const EnhancedMessagesWidget: React.FC<EnhancedMessagesWidgetProps> = ({ openGro
       console.log('Loaded messages count:', conversationMessages.length);
       
       // Load pinned messages for this conversation
-      loadPinnedMessages(conversation.id);
+      // For DMs, use the composite room_id format
+      const roomIdForPinned = conversation.type === 'direct_message'
+        ? `dm:${conversation.name || conversation.other_user || ''}`
+        : conversation.id;
+      loadPinnedMessages(roomIdForPinned);
       
       // Debug: Check which messages are thread messages
       const threadMessages = conversationMessages.filter(msg => msg.is_thread_message);
@@ -1209,6 +1215,11 @@ const EnhancedMessagesWidget: React.FC<EnhancedMessagesWidgetProps> = ({ openGro
                               <button
                                 onClick={async () => {
                                   try {
+                                    // Build proper room_id for DMs
+                                    const roomId = selectedConversation?.type === 'direct_message'
+                                      ? `dm:${selectedConversation?.name || selectedConversation?.other_user || ''}`
+                                      : selectedConversation?.id;
+                                    
                                     const response = await fetch('http://localhost:8000/chat/unpin-message', {
                                       method: 'POST',
                                       headers: {
@@ -1217,7 +1228,7 @@ const EnhancedMessagesWidget: React.FC<EnhancedMessagesWidgetProps> = ({ openGro
                                       },
                                       body: JSON.stringify({
                                         message_id: pinnedMsg.id,
-                                        room_id: selectedConversation?.id
+                                        room_id: roomId
                                       })
                                     });
                                     
@@ -1240,7 +1251,10 @@ const EnhancedMessagesWidget: React.FC<EnhancedMessagesWidgetProps> = ({ openGro
                                       });
                                       
                                       // Reload pinned messages to sync with server
-                                      loadPinnedMessages(selectedConversation?.id || '');
+                                      const reloadRoomId = selectedConversation?.type === 'direct_message'
+                                        ? `dm:${selectedConversation?.name || selectedConversation?.other_user || ''}`
+                                        : (selectedConversation?.id || '');
+                                      loadPinnedMessages(reloadRoomId);
                                     } else {
                                       throw new Error(data.message || 'Failed to unpin message');
                                     }
@@ -1589,23 +1603,41 @@ const EnhancedMessagesWidget: React.FC<EnhancedMessagesWidgetProps> = ({ openGro
                                             const isCurrentlyPinned = pinnedMessageIds.has(message.id);
                                             
                                             try {
-                                              // Use rocket_chat_group_id if available (for groups), otherwise use conversation id
-                                              let roomId = selectedConversation?.id || '';
-                                              const roomName = selectedConversation?.name || selectedConversation?.display_name || '';
+                                              // Determine room_id based on conversation type
+                                              let roomId = '';
+                                              let roomName = '';
+                                              let roomType = '';
                                               
-                                              // For private groups, prefer rocket_chat_group_id from the conversation
-                                              if (selectedConversation?.type === 'private_group') {
-                                                const group = groups.find(g => g.id === selectedConversation.id || g.name === selectedConversation.name);
-                                                if (group && (group as any).rocket_chat_group_id) {
-                                                  roomId = (group as any).rocket_chat_group_id;
-                                                } else if ((selectedConversation as any).rocket_chat_group_id) {
-                                                  roomId = (selectedConversation as any).rocket_chat_group_id;
+                                              if (selectedConversation?.type === 'direct_message') {
+                                                // For DMs, use a composite ID based on username
+                                                const dmUsername = selectedConversation?.name || selectedConversation?.other_user || '';
+                                                roomId = `dm:${dmUsername}`;
+                                                roomName = selectedConversation?.display_name || selectedConversation?.name || selectedConversation?.other_user || dmUsername || 'DM';
+                                                roomType = 'direct_message';
+                                              } else if (selectedConversation?.type === 'private_group') {
+                                                // For private groups, prefer rocket_chat_group_id
+                                                roomId = (selectedConversation as any).rocket_chat_group_id || selectedConversation?.id || '';
+                                                
+                                                // Fallback to finding rocket_chat_group_id from groups
+                                                if (!roomId || !roomId.startsWith('6')) {
+                                                  const group = groups.find(g => g.id === selectedConversation.id || g.name === selectedConversation.name);
+                                                  if (group && (group as any).rocket_chat_group_id) {
+                                                    roomId = (group as any).rocket_chat_group_id;
+                                                  }
                                                 }
+                                                
+                                                roomName = selectedConversation?.name || selectedConversation?.display_name || '';
+                                                roomType = 'private_group';
+                                              } else {
+                                                // For channels, use the ID
+                                                roomId = selectedConversation?.id || '';
+                                                roomName = selectedConversation?.name || selectedConversation?.display_name || '';
+                                                roomType = 'channel';
                                               }
                                               
                                               if (isCurrentlyPinned) {
                                                 // Unpin the message
-                                                console.log('📌 Unpinning message:', { messageId: message.id, roomId });
+                                                console.log('📌 Unpinning message:', { messageId: message.id, roomId, roomType });
                                                 
                                                 const response = await fetch('http://localhost:8000/chat/unpin-message', {
                                                   method: 'POST',
@@ -1615,7 +1647,9 @@ const EnhancedMessagesWidget: React.FC<EnhancedMessagesWidgetProps> = ({ openGro
                                                   },
                                                   body: JSON.stringify({
                                                     message_id: message.id,
-                                                    room_id: roomId
+                                                    room_id: roomId,
+                                                    room_name: roomName,
+                                                    room_type: roomType
                                                   })
                                                 });
                                                 
@@ -1638,12 +1672,13 @@ const EnhancedMessagesWidget: React.FC<EnhancedMessagesWidgetProps> = ({ openGro
                                                 });
                                                 
                                                 // Reload pinned messages to update the header
-                                                if (selectedConversation) {
-                                                  loadPinnedMessages(selectedConversation.id);
-                                                }
+                                                // For DMs, pass the proper room_id format
+                                                const reloadRoomId = selectedConversation?.type === 'direct_message' 
+                                                  ? `dm:${selectedConversation?.name || selectedConversation?.other_user || ''}`
+                                                  : roomId;
+                                                loadPinnedMessages(reloadRoomId);
                                               } else {
                                                 // Pin the message
-                                                const roomType = selectedConversation?.type === 'private_group' ? 'group' : 'channel';
                                                 console.log('📌 Pinning message:', { messageId: message.id, roomId, roomName, roomType });
                                                 
                                                 const response = await fetch('http://localhost:8000/chat/pin-message', {
@@ -1675,9 +1710,12 @@ const EnhancedMessagesWidget: React.FC<EnhancedMessagesWidgetProps> = ({ openGro
                                                 // Add to pinned messages set
                                                 setPinnedMessageIds(prev => new Set(prev).add(message.id));
                                                 
-                                                // Reload pinned messages
+                                                // Reload pinned messages with proper room_id format for DMs
                                                 if (selectedConversation) {
-                                                  loadPinnedMessages(selectedConversation.id);
+                                                  const reloadRoomId = selectedConversation.type === 'direct_message'
+                                                    ? `dm:${selectedConversation.name || selectedConversation.other_user || ''}`
+                                                    : selectedConversation.id;
+                                                  loadPinnedMessages(reloadRoomId);
                                                 }
                                               }
                                             } catch (error) {
@@ -1759,9 +1797,12 @@ const EnhancedMessagesWidget: React.FC<EnhancedMessagesWidgetProps> = ({ openGro
                                                   // Remove from pinned messages array
                                                   setPinnedMessages(prev => prev.filter(msg => msg.id !== message.id));
                                                   
-                                                  // Reload pinned messages
+                                                  // Reload pinned messages with proper room_id format for DMs
                                                   if (selectedConversation) {
-                                                    loadPinnedMessages(selectedConversation.id);
+                                                    const reloadRoomId = selectedConversation.type === 'direct_message'
+                                                      ? `dm:${selectedConversation.name || selectedConversation.other_user || ''}`
+                                                      : selectedConversation.id;
+                                                    loadPinnedMessages(reloadRoomId);
                                                   }
                                                 }
                                               } catch (error) {
