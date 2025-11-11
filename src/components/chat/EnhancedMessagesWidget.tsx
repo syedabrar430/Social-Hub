@@ -9,7 +9,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { type ChatConversation, type ChatMessage } from '@/services/chat';
 import { chatService as rocketChatService } from '@/services/chat';
 import { useToast } from '@/hooks/use-toast';
-import { Hash, Lock, MessageCircle, Users, User, Search, Send, Smile, Reply, Paperclip, Image, File, Mic, Video, MoreHorizontal, UserPlus, Pin, Trash2 } from 'lucide-react';
+import { Hash, Lock, MessageCircle, Users, User, Search, Send, Smile, Reply, Paperclip, Image, File, Mic, Video, MoreHorizontal, UserPlus, Pin, Trash2, Phone } from 'lucide-react';
 import { UserSearch } from './UserSearch';
 import { UserSearchResult } from '@/services/api';
 
@@ -1186,6 +1186,22 @@ const EnhancedMessagesWidget: React.FC<EnhancedMessagesWidgetProps> = ({ openGro
                         </p>
                       </div>
                     </div>
+                    {/* Audio call button - only show for DMs */}
+                    {selectedConversation.type === 'direct_message' && (
+                      <button
+                        onClick={() => {
+                          toast({
+                            title: "Audio Call",
+                            description: "Initiating audio call with " + (selectedConversation.name || selectedConversation.other_user),
+                          });
+                          console.log('📞 Starting audio call with:', selectedConversation.name || selectedConversation.other_user);
+                        }}
+                        className="p-2 hover:bg-gray-200 rounded-full transition-colors flex items-center gap-2"
+                        title="Start audio call"
+                      >
+                        <Phone className="h-5 w-5 text-blue-600" />
+                      </button>
+                    )}
                   </div>
                 </div>
 
