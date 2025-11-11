@@ -18,6 +18,25 @@ __pycache__/
 *.pyo
 *.pyd
 
+# Python virtual environments
+venv/
+env/
+ENV/
+backend/venv/
+*.venv
+
+# Environment variables - NEVER commit these!
+.env
+*.env
+backend/.env
+**/.env
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+social_hub.db
+
 # Upload directories
 uploads/
 */uploads/
