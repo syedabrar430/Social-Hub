@@ -28,6 +28,7 @@ npm run dev     # Terminal 2 (frontend on :8080)
 - The database (`backend/social_hub.db`) is already included with sample users
 - Rocket.Chat server is hosted separately (no local setup needed)
 - All users from the database are synced with Rocket.Chat via Single Sign-On (SSO)
+- **🆕 Jitsi Meet** server is integrated for audio/video calls (no additional setup required)
 
 ## 🎨 Features
 
@@ -37,13 +38,22 @@ npm run dev     # Terminal 2 (frontend on :8080)
 - **JWT Token Authentication** for secure API access
 - **User Profile Management** with profile pictures from Google
 
+### 🆕 Communication Features
+- **📞 Audio Calls** - High-quality audio calling with Jitsi Meet
+- **📹 Video Calls** - Face-to-face video conversations
+- **👥 Conference Calls** - Group meetings with screen sharing
+- **🔗 Shareable Meeting Links** - One-click invite sharing
+- **RocketChat Integration** - Text chat with real-time messaging
+- **Independent Services** - Audio/video calls work separately from chat
+
 ### Frontend Features
 - **Modern UI** with pastel design and smooth animations
 - **Responsive Design** - Mobile-first approach
 - **Feed System** - Social posts with interactions
 - **Real-time Notifications** system
-- **Chat/Messaging** interface
+- **Chat/Messaging** interface with integrated calls
 - **Profile Management** with edit capabilities
+- **Communication Hub** - Centralized call controls
 
 ### Backend Features
 - **FastAPI REST API** with automatic documentation
@@ -124,23 +134,39 @@ npm run dev
 - **Python** (3.8 or higher)
 - **Git**
 - **Access to Rocket.Chat Server** (credentials provided separately)
+- **Access to Jitsi Meet Server** at `http://10.68.0.49:30083` (for audio/video calls)
 - **Google Cloud Console** account (for OAuth) - Optional
 
 ## 🏗️ Project Structure
 ```
 Social-Hub/
-├── src/                      # Frontend React app
-├── backend/                 # FastAPI backend
-│   ├── main.py              # Backend server
-│   ├── database.py          # Database models
-│   ├── auth.py              # Authentication logic
-│   ├── crud.py              # Database operations
-│   ├── rocket_chat_local.py # Rocket.Chat integration
-│   ├── social_hub.db        # SQLite database (included in repo)
-│   └── requirements.txt     # Python dependencies
-├── public/                  # Static assets
-├── .env.example            # Frontend environment template
-└── README.md               # This file
+├── src/                          # Frontend React app
+│   ├── services/
+│   │   ├── jitsi.ts             # 🆕 Jitsi Meet integration
+│   │   ├── rocketchat.ts        # 🆕 RocketChat API service
+│   │   └── api.ts               # Backend API client
+│   ├── components/
+│   │   └── chat/
+│   │       ├── CallButtons.tsx  # 🆕 Audio/Video call buttons
+│   │       ├── RocketChatPopup.tsx
+│   │       └── ...
+│   └── pages/
+│       └── Messages.tsx         # 🆕 Updated with Communication Hub
+├── backend/                     # FastAPI backend
+│   ├── main.py                  # Backend server
+│   ├── database.py              # Database models
+│   ├── auth.py                  # Authentication logic
+│   ├── crud.py                  # Database operations
+│   ├── rocket_chat_local.py     # Rocket.Chat integration
+│   ├── social_hub.db            # SQLite database (included in repo)
+│   └── requirements.txt         # Python dependencies
+├── public/                      # Static assets
+├── .env.example                 # Frontend environment template
+├── README.md                    # This file
+├── 🆕 QUICK_START.md            # Quick start guide for calls
+├── 🆕 JITSI_INTEGRATION.md      # Jitsi integration documentation
+├── 🆕 IMPLEMENTATION_SUMMARY.md # Complete feature overview
+└── 🆕 TESTING_AUDIO_VIDEO_CALLS.md # Testing procedures
 ```
 
 ---
@@ -329,7 +355,17 @@ npm run dev
 3. Complete Google OAuth flow
 4. Verify you're redirected to the feed
 
-### 7.3 Verify Database Storage
+### 7.3 🆕 Test Audio/Video Calls
+1. Navigate to **Messages** page
+2. See **Communication Hub** card at top
+3. Click **📞 Audio Call** button → Opens audio-only call
+4. Click **📹 Video Call** button → Opens video + audio call
+5. Click **👥 Conference** button → Opens group conference
+6. Copy meeting link and share with others to test multi-user join
+
+📖 **For detailed testing**: See [TESTING_AUDIO_VIDEO_CALLS.md](TESTING_AUDIO_VIDEO_CALLS.md)
+
+### 7.4 Verify Database Storage
 ```bash
 # Check users in database
 sqlite3 backend/social_hub.db "SELECT * FROM users;"
@@ -351,6 +387,11 @@ sqlite3 backend/social_hub.db "SELECT * FROM users;"
 - `GET /health` - Health check
 - `GET /docs` - Interactive API documentation
 
+### 🆕 External Services
+- **Jitsi Meet** (`http://10.68.0.49:30083`) - Audio/video calls
+- **RocketChat** (`http://10.68.0.49:30082`) - Text messaging
+- Both services are integrated but operate independently
+
 ---
 
 ## 🛠 Technology Stack
@@ -362,6 +403,7 @@ sqlite3 backend/social_hub.db "SELECT * FROM users;"
 - **shadcn/ui** component library
 - **React Router** for navigation
 - **Lucide React** for icons
+- **🆕 Jitsi Meet** integration for audio/video calls
 
 ### Backend
 - **FastAPI** for REST API
@@ -371,6 +413,11 @@ sqlite3 backend/social_hub.db "SELECT * FROM users;"
 - **Google OAuth** for social login
 - **bcrypt** for password hashing
 - **CORS** middleware enabled
+
+### Communication Services
+- **🆕 Jitsi Meet** - WebRTC-based audio/video calling
+- **RocketChat** - Real-time text messaging via REST API
+- **SSO Integration** - Unified authentication across services
 
 ### Authentication Flow
 - **JWT Tokens** for session management
@@ -452,5 +499,15 @@ If you encounter any issues during setup:
 2. Verify all environment variables are set correctly
 3. Ensure both frontend and backend servers are running
 4. Check browser console and terminal for error messages
+5. **For call issues**: See [JITSI_INTEGRATION.md](JITSI_INTEGRATION.md) troubleshooting section
 
-Built with ❤️ using React.js, FastAPI, and modern web technologies
+## 📚 Additional Documentation
+
+- **[QUICK_START.md](QUICK_START.md)** - Get started with audio/video calls in 3 minutes
+- **[JITSI_INTEGRATION.md](JITSI_INTEGRATION.md)** - Complete Jitsi Meet integration guide
+- **[IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md)** - Detailed feature overview
+- **[TESTING_AUDIO_VIDEO_CALLS.md](TESTING_AUDIO_VIDEO_CALLS.md)** - Comprehensive testing guide
+- **[ARCHITECTURE_DIAGRAM.md](ARCHITECTURE_DIAGRAM.md)** - System architecture visualization
+- **[CHECKLIST.md](CHECKLIST.md)** - Implementation verification checklist
+
+Built with ❤️ using React.js, FastAPI, Jitsi Meet, and modern web technologies

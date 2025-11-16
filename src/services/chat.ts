@@ -53,6 +53,7 @@ export interface ChatConversation {
   member_count?: number;
   joined?: boolean;
   other_user?: string;
+  other_user_email?: string; // Email address of the other user in DM
   last_message?: ChatMessage;
   unread_count: number;
   rocket_chat_group_id?: string; // Add this field for private groups

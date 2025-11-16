@@ -82,49 +82,46 @@ async def register(user: UserRegistration, db: Session = Depends(get_db)):
     # Create new user
     try:
         db_user = create_user(db, user)
-        # Provision Rocket.Chat user
-        import asyncio
-        try:
-            # Use email as username (before @)
-            username = user.email.split('@')[0]
-            # Call Rocket.Chat user creation (async)
-            rc_result = await rocket_client.create_user_account(
-                email=user.email,
-                username=username,
-                password=user.password,
-                full_name=user.full_name
-            )
-            if not rc_result.get('success'):
-                # Rollback Social Hub user if Rocket.Chat fails
-                db.delete(db_user)
-                db.commit()
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=f"Failed to create Rocket.Chat user: {rc_result.get('error', 'Unknown error')}"
+        
+        # Optionally provision Rocket.Chat user (only if configured)
+        rocket_chat_enabled = os.getenv("ROCKET_CHAT_USER_ID") and os.getenv("ROCKET_CHAT_AUTH_TOKEN")
+        if rocket_chat_enabled:
+            try:
+                # Use email as username (before @)
+                username = user.email.split('@')[0]
+                # Call Rocket.Chat user creation (async)
+                rc_result = await rocket_client.create_user_account(
+                    email=user.email,
+                    username=username,
+                    password=user.password,
+                    full_name=user.full_name
                 )
-        except Exception as rc_exc:
-            # Rollback Social Hub user if Rocket.Chat fails
-            db.delete(db_user)
-            db.commit()
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to create Rocket.Chat user: {str(rc_exc)}"
-            )
+                if not rc_result.get('success'):
+                    print(f"Warning: Failed to create Rocket.Chat user: {rc_result.get('error', 'Unknown error')}")
+                    # Continue anyway - Rocket.Chat is optional
+            except Exception as rc_exc:
+                print(f"Warning: Failed to create Rocket.Chat user: {str(rc_exc)}")
+                # Continue anyway - Rocket.Chat is optional
 
         # Create access token
         access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = create_access_token(
             data={"sub": db_user.email}, expires_delta=access_token_expires
         )
+        
         return {
             "access_token": access_token,
             "token_type": "bearer",
             "user": UserResponse.from_orm(db_user)
         }
+    except HTTPException:
+        raise
     except Exception as e:
+        db.rollback()
+        print(f"Registration error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create user"
+            detail=f"Failed to create user: {str(e)}"
         )
 
 # Login endpoint

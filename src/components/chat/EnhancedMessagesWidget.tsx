@@ -9,9 +9,10 @@ import { useAuth } from '@/contexts/AuthContext';
 import { type ChatConversation, type ChatMessage } from '@/services/chat';
 import { chatService as rocketChatService } from '@/services/chat';
 import { useToast } from '@/hooks/use-toast';
-import { Hash, Lock, MessageCircle, Users, User, Search, Send, Smile, Reply, Paperclip, Image, File, Mic, Video, MoreHorizontal, UserPlus, Pin, Trash2, Phone } from 'lucide-react';
+import { Hash, Lock, MessageCircle, Users, User, Search, Send, Smile, Reply, Paperclip, Image, File, Mic, Video, MoreHorizontal, UserPlus, Pin, Trash2 } from 'lucide-react';
 import { UserSearch } from './UserSearch';
 import { UserSearchResult } from '@/services/api';
+import InlineCallButtons from './InlineCallButtons';
 
 // Helper function to format message timestamp
 const formatMessageTime = (timestamp: string) => {
@@ -161,6 +162,54 @@ const EnhancedMessagesWidget: React.FC<EnhancedMessagesWidgetProps> = ({ openGro
       loadChannelsAndDMs();
     }
   }, [isAuthenticated, isInitialized, openGroup]);
+
+  // Auto-refresh messages every 3 seconds when a conversation is selected
+  useEffect(() => {
+    if (!selectedConversation || !isAuthenticated) {
+      return;
+    }
+
+    console.log('🔄 Setting up auto-refresh for conversation:', selectedConversation.name);
+
+    // Function to refresh messages
+    const refreshMessages = async () => {
+      try {
+        let conversationMessages: ChatMessage[] = [];
+        
+        if (selectedConversation.type === 'direct_message' && selectedConversation.other_user) {
+          const username = selectedConversation.name || selectedConversation.other_user;
+          conversationMessages = await rocketChatService.getDirectMessageMessages(username);
+        } else {
+          conversationMessages = await rocketChatService.getRocketChatChannelMessages(
+            selectedConversation.name || selectedConversation.id,
+            selectedConversation.type === 'private_group' ? 'group' : 'channel'
+          );
+        }
+        
+        // Filter out thread messages
+        const isThreadMessage = (msg: any): boolean => {
+          if (msg.is_thread_message === true || msg.thread_ts || msg.tmid) {
+            return true;
+          }
+          return false;
+        };
+        
+        const filteredMessages = conversationMessages.filter(msg => !isThreadMessage(msg));
+        setMessages(filteredMessages);
+      } catch (error) {
+        console.error('❌ Auto-refresh failed:', error);
+      }
+    };
+
+    // Set up interval for auto-refresh
+    const intervalId = setInterval(refreshMessages, 3000); // Refresh every 3 seconds
+
+    // Clean up interval on unmount or when conversation changes
+    return () => {
+      console.log('🛑 Clearing auto-refresh interval');
+      clearInterval(intervalId);
+    };
+  }, [selectedConversation, isAuthenticated]);
 
 
   // Filter DMs based on messages
@@ -1186,21 +1235,14 @@ const EnhancedMessagesWidget: React.FC<EnhancedMessagesWidgetProps> = ({ openGro
                         </p>
                       </div>
                     </div>
-                    {/* Audio call button - only show for DMs */}
+                    {/* Call buttons - only show for DMs */}
                     {selectedConversation.type === 'direct_message' && (
-                      <button
-                        onClick={() => {
-                          toast({
-                            title: "Audio Call",
-                            description: "Initiating audio call with " + (selectedConversation.name || selectedConversation.other_user),
-                          });
-                          console.log('📞 Starting audio call with:', selectedConversation.name || selectedConversation.other_user);
-                        }}
-                        className="p-2 hover:bg-gray-200 rounded-full transition-colors flex items-center gap-2"
-                        title="Start audio call"
-                      >
-                        <Phone className="h-5 w-5 text-blue-600" />
-                      </button>
+                      <InlineCallButtons 
+                        recipientName={selectedConversation.display_name || selectedConversation.name || selectedConversation.other_user || 'User'}
+                        recipientEmail={selectedConversation.other_user_email || selectedConversation.other_user}
+                        recipientUsername={selectedConversation.other_user || selectedConversation.name}
+                        size="sm"
+                      />
                     )}
                   </div>
                 </div>
