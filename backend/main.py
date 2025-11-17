@@ -1338,11 +1338,12 @@ async def get_complete_dm_list(current_user: User = Depends(get_current_user), d
             )
         
         # Simple: Get DMs from Rocket.Chat (already filtered for messages > 0)
-        rooms = await rocket_client.get_all_user_rooms(user_headers=user_headers)
+        rooms = await rocket_client.get_all_user_rooms(user_headers=user_headers, db_session=db)
         dms = rooms['direct_messages']
         
         print(f"DEBUG: Found {len(dms)} DMs with messages > 0")
         print(f"DEBUG: DM users: {[dm.get('other_user') for dm in dms]}")
+        print(f"DEBUG: DM emails: {[dm.get('other_user_email') for dm in dms]}")
         
         return {"dms": dms}
     except HTTPException:
@@ -1462,6 +1463,66 @@ async def send_dm_message(
     except Exception as e:
         print(f"Error sending DM: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to send DM: {str(e)}")
+
+@app.post("/api/rocket-chat/resolve-user-email")
+async def resolve_user_email(
+    request_data: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Resolve a username to an email address for call invitations"""
+    try:
+        username = request_data.get("username")
+        
+        if not username:
+            raise HTTPException(status_code=400, detail="Username is required")
+        
+        print(f"DEBUG: Resolving email for username: {username}")
+        
+        # Try to find user in Social Hub database first
+        # Username might be the email prefix or the actual username
+        db_user = None
+        
+        # Try finding by email (username@domain)
+        for domain in ["gmail.com", "yahoo.com", "outlook.com", "hotmail.com"]:
+            potential_email = f"{username}@{domain}"
+            db_user = get_user_by_email(db, potential_email)
+            if db_user:
+                print(f"✅ Found user by constructed email: {potential_email}")
+                break
+        
+        # Try finding by checking all users and matching username part of email
+        if not db_user:
+            all_users = db.query(User).filter(User.is_active == True).all()
+            for user in all_users:
+                email_prefix = user.email.split('@')[0]
+                if email_prefix == username or user.email == username:
+                    db_user = user
+                    print(f"✅ Found user by email prefix match: {user.email}")
+                    break
+        
+        if db_user:
+            return {
+                "success": True,
+                "username": username,
+                "email": db_user.email,
+                "full_name": db_user.full_name
+            }
+        else:
+            # Fallback: return gmail as most common
+            fallback_email = f"{username}@gmail.com"
+            print(f"⚠️ User not found in database, using fallback: {fallback_email}")
+            return {
+                "success": True,
+                "username": username,
+                "email": fallback_email,
+                "full_name": username,
+                "note": "Email is a best-guess fallback"
+            }
+            
+    except Exception as e:
+        print(f"Error resolving user email: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to resolve user email: {str(e)}")
 
 @app.get("/api/rocket-chat/user-rooms")
 async def get_user_rooms(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):

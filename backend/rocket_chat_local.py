@@ -1796,7 +1796,7 @@ class RocketChatClient:
             print(f"Exception removing user from group: {e}")
             return {"success": False, "error": str(e)}
 
-    async def get_rooms_list(self, user_headers: Dict = None) -> Dict:
+    async def get_rooms_list(self, user_headers: Dict = None, db_session=None) -> Dict:
         """Get all rooms (channels, groups, DMs) that the user is part of"""
         try:
             print("🔍 Fetching rooms using rooms.get API for channels/groups and im.list for DMs")
@@ -1812,7 +1812,7 @@ class RocketChatClient:
             channels, groups = await self.get_channels_and_groups(headers)
             
             # Get DMs using im.list API for better user information
-            direct_messages = await self.get_direct_messages(headers, user_headers)
+            direct_messages = await self.get_direct_messages(headers, user_headers, db_session)
             
             print(f"DEBUG: Final result - Channels: {len(channels)}, Groups: {len(groups)}, DMs: {len(direct_messages)}")
             
@@ -1870,7 +1870,7 @@ class RocketChatClient:
             print(f"Exception getting channels and groups: {e}")
             return [], []
 
-    async def get_direct_messages(self, headers: Dict, user_headers: Dict = None) -> List[Dict]:
+    async def get_direct_messages(self, headers: Dict, user_headers: Dict = None, db_session=None) -> List[Dict]:
         """Get direct messages using im.list API for better user information"""
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
@@ -1928,6 +1928,61 @@ class RocketChatClient:
                         'other_user': other_user,
                         'msgs': msg_count
                     }
+                    
+                    # Add other_user_email by querying database if db_session is provided
+                    if db_session:
+                        try:
+                            from database import User
+                            
+                            # Try multiple methods to find the user:
+                            # 1. Try to find user by rocket_chat_username
+                            # 2. Try to find by email prefix (username before @)
+                            # 3. Try to construct full email and match
+                            db_user = None
+                            
+                            # Method 1: Check if rocket_chat_username matches
+                            if db_user is None:
+                                db_user = db_session.query(User).filter(
+                                    User.rocket_chat_username == other_user
+                                ).first()
+                                if db_user:
+                                    print(f"DEBUG: Found user by rocket_chat_username: {other_user}")
+                            
+                            # Method 2: Try email prefix match (user@ pattern)
+                            if db_user is None:
+                                db_user = db_session.query(User).filter(
+                                    User.email.like(f"{other_user}@%")
+                                ).first()
+                                if db_user:
+                                    print(f"DEBUG: Found user by email prefix: {other_user}@*")
+                            
+                            # Method 3: Try exact email match (if other_user already contains @)
+                            if db_user is None and '@' in other_user:
+                                db_user = db_session.query(User).filter(
+                                    User.email == other_user
+                                ).first()
+                                if db_user:
+                                    print(f"DEBUG: Found user by exact email: {other_user}")
+                            
+                            if db_user:
+                                room_data['other_user_email'] = db_user.email
+                                room_data['display_name'] = db_user.full_name
+                                room_data['profile_picture_url'] = db_user.profile_picture_url
+                                print(f"✅ Added email for {other_user}: {db_user.email}")
+                            else:
+                                # Fallback: construct email from username (assume @example.com)
+                                fallback_email = f"{other_user}@example.com" if '@' not in other_user else other_user
+                                room_data['other_user_email'] = fallback_email
+                                print(f"⚠️ User not found in DB, using fallback email: {fallback_email}")
+                        except Exception as e:
+                            print(f"❌ Error fetching user email from database: {e}")
+                            import traceback
+                            traceback.print_exc()
+                            # Fallback: construct email from username
+                            fallback_email = f"{other_user}@example.com" if '@' not in other_user else other_user
+                            room_data['other_user_email'] = fallback_email
+                    else:
+                        print(f"⚠️ No db_session provided, cannot lookup user email for {other_user}")
                     
                     direct_messages.append(room_data)
                     print(f"DEBUG: Added DM: {other_user} (msgs: {msg_count})")
@@ -2017,13 +2072,13 @@ class RocketChatClient:
             print(f"Exception getting groups list: {e}")
             return []
 
-    async def get_all_user_rooms(self, user_headers: Dict = None) -> Dict:
+    async def get_all_user_rooms(self, user_headers: Dict = None, db_session=None) -> Dict:
         """Get all channels, groups, and DMs that the user is part of using rooms.get API"""
         try:
             print("🔍 Fetching real Rocket.Chat rooms data using rooms.get API")
             
             # Use the new rooms.get API for better accuracy
-            return await self.get_rooms_list(user_headers)
+            return await self.get_rooms_list(user_headers, db_session)
                 
         except Exception as e:
             print(f"Exception getting all conversations: {e}")

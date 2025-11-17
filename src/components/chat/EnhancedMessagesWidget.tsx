@@ -13,6 +13,7 @@ import { Hash, Lock, MessageCircle, Users, User, Search, Send, Smile, Reply, Pap
 import { UserSearch } from './UserSearch';
 import { UserSearchResult } from '@/services/api';
 import InlineCallButtons from './InlineCallButtons';
+import { Linkify } from '@/lib/linkify';
 
 // Helper function to format message timestamp
 const formatMessageTime = (timestamp: string) => {
@@ -201,13 +202,22 @@ const EnhancedMessagesWidget: React.FC<EnhancedMessagesWidgetProps> = ({ openGro
       }
     };
 
+    // Listen for custom refresh events (e.g., after sending a call invitation)
+    const handleRefreshEvent = (event: CustomEvent) => {
+      console.log('🔔 Refresh-messages event received:', event.detail);
+      refreshMessages();
+    };
+
+    window.addEventListener('refresh-messages', handleRefreshEvent as EventListener);
+
     // Set up interval for auto-refresh
     const intervalId = setInterval(refreshMessages, 3000); // Refresh every 3 seconds
 
-    // Clean up interval on unmount or when conversation changes
+    // Clean up interval and event listener on unmount or when conversation changes
     return () => {
-      console.log('🛑 Clearing auto-refresh interval');
+      console.log('🛑 Clearing auto-refresh interval and event listener');
       clearInterval(intervalId);
+      window.removeEventListener('refresh-messages', handleRefreshEvent as EventListener);
     };
   }, [selectedConversation, isAuthenticated]);
 
@@ -1237,12 +1247,28 @@ const EnhancedMessagesWidget: React.FC<EnhancedMessagesWidgetProps> = ({ openGro
                     </div>
                     {/* Call buttons - only show for DMs */}
                     {selectedConversation.type === 'direct_message' && (
-                      <InlineCallButtons 
-                        recipientName={selectedConversation.display_name || selectedConversation.name || selectedConversation.other_user || 'User'}
-                        recipientEmail={selectedConversation.other_user_email || selectedConversation.other_user}
-                        recipientUsername={selectedConversation.other_user || selectedConversation.name}
-                        size="sm"
-                      />
+                      <>
+                        {console.log('🔍 DM Conversation Data:', {
+                          display_name: selectedConversation.display_name,
+                          name: selectedConversation.name,
+                          other_user: selectedConversation.other_user,
+                          other_user_email: selectedConversation.other_user_email,
+                          type: selectedConversation.type
+                        })}
+                        <InlineCallButtons 
+                          recipientName={selectedConversation.display_name || selectedConversation.other_user || 'User'}
+                          recipientEmail={selectedConversation.other_user_email}
+                          recipientUsername={selectedConversation.name}
+                          size="sm"
+                        />
+                        {console.log('🎯 Selected conversation data for call buttons:', {
+                          display_name: selectedConversation.display_name,
+                          name: selectedConversation.name,
+                          other_user: selectedConversation.other_user,
+                          other_user_email: selectedConversation.other_user_email,
+                          type: selectedConversation.type
+                        })}
+                      </>
                     )}
                   </div>
                 </div>
@@ -1466,7 +1492,12 @@ const EnhancedMessagesWidget: React.FC<EnhancedMessagesWidgetProps> = ({ openGro
                                       {message.user?.username || message.user?.name || message.sender}
                                     </div>
                                   )}
-                                  <p className="text-sm">{message.text || message.content}</p>
+                                  <div className="text-sm">
+                                    <Linkify 
+                                      text={message.text || message.content || ''} 
+                                      detectCallInvitations={true}
+                                    />
+                                  </div>
                                   
                                   {/* File Attachments Display */}
                                   {message.attachments && message.attachments.length > 0 && (

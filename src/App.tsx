@@ -27,17 +27,24 @@ const GlobalCallNotifications = () => {
   const [incomingCall, setIncomingCall] = useState<CallInvitation | null>(null);
 
   useEffect(() => {
-    if (!user?.email) return;
+    if (!user?.email) {
+      console.log('⚠️ No user email, not starting call listener');
+      return;
+    }
 
     console.log('🎧 Starting call invitation listener for:', user.email);
+    console.log('🎧 User object:', { name: user.name, email: user.email });
     callInvitationManager.startListening(user.email);
 
     const unsubscribe = callInvitationManager.onInvitation((invitation) => {
+      console.log('📞 ========================================');
       console.log('📞 INCOMING CALL NOTIFICATION RECEIVED!');
       console.log('📞 Invitation details:', invitation);
+      console.log('📞 Current user:', user.email);
       console.log('📞 Setting incoming call state...');
       setIncomingCall(invitation);
       console.log('✅ Incoming call state set!');
+      console.log('📞 ========================================');
       
       // Optional: Play notification sound here
       // new Audio('/notification.mp3').play().catch(console.error);

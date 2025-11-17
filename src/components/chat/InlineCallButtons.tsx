@@ -35,19 +35,74 @@ const InlineCallButtons: React.FC<InlineCallButtonsProps> = ({
   const [callType, setCallType] = useState<CallType>(CallType.AUDIO);
   const [sendingInvite, setSendingInvite] = useState(false);
 
+  // Debug: Log props when component renders
+  console.log('🎯 InlineCallButtons rendered with props:', {
+    recipientName,
+    recipientEmail,
+    recipientUsername,
+    currentUser: user?.email
+  });
+
   const sendMeetingInvite = async (link: string, type: CallType) => {
     if (!recipientUsername && !recipientName) {
-      console.warn('No recipient username or name available');
+      console.error('❌ No recipient username or name available');
+      toast.error('Cannot send invitation', {
+        description: 'Recipient information is missing',
+      });
       return;
     }
 
-    console.log('📞 Sending call invitation:', {
+    console.log('📞 ========================================');
+    console.log('📞 ========== SENDING CALL INVITATION ==========');
+    console.log('📞 ========================================');
+    console.log('📞 Step 1: Initial Recipient Info:', {
       recipientName,
       recipientEmail,
       recipientUsername,
       callType: type,
-      meetingLink: link
+      meetingLink: link,
+      currentUser: user?.email
     });
+
+    // Try to resolve email from backend if not provided
+    let effectiveRecipientEmail = recipientEmail;
+    console.log('📞 Step 2: Checking if email resolution needed...');
+    
+    if (!effectiveRecipientEmail && recipientUsername) {
+      console.log('🔍 No recipientEmail provided, resolving from backend...');
+      try {
+        const response = await fetch('http://localhost:8000/api/rocket-chat/resolve-user-email', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+          },
+          body: JSON.stringify({ username: recipientUsername })
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          console.log('📞 Step 3: Backend response:', data);
+          if (data.success && data.email) {
+            effectiveRecipientEmail = data.email;
+            console.log('✅ Successfully resolved email from backend:', effectiveRecipientEmail);
+          } else {
+            console.error('❌ Backend returned no email:', data);
+          }
+        } else {
+          console.error('❌ Backend response not OK:', response.status, response.statusText);
+        }
+      } catch (error) {
+        console.error('❌ Failed to resolve email from backend:', error);
+      }
+    }
+    
+    console.log('📞 Step 4: Final effective recipient email:', effectiveRecipientEmail);
+
+    if (!effectiveRecipientEmail) {
+      console.warn('⚠️ Still no recipientEmail after backend lookup! Popup may not appear.');
+      console.warn('⚠️ Message will still be sent, but recipient won\'t get popup notification.');
+    }
 
     setSendingInvite(true);
     try {
@@ -65,11 +120,23 @@ const InlineCallButtons: React.FC<InlineCallButtonsProps> = ({
       console.log('📝 Message content:', message);
       
       const result = await chatService.sendDirectMessage(recipient, message);
-      console.log('✉️ Send DM result:', result);
+      console.log('📞 Step 5: Send DM result:', result);
       
       if (result.success) {
+        console.log('✅ Step 6: Message sent successfully to chat!');
+        
+        // Trigger immediate message refresh by dispatching a custom event
+        console.log('🔄 Triggering immediate message refresh...');
+        window.dispatchEvent(new CustomEvent('refresh-messages', { 
+          detail: { 
+            conversationType: 'direct_message',
+            recipient: recipient 
+          }
+        }));
+        
         // Send the popup notification to the recipient
         // This uses localStorage for cross-tab/cross-window communication
+        console.log('📞 Step 7: Creating invitation object...');
         const invitation = {
           id: `call-${Date.now()}-${Math.random().toString(36).substring(7)}`,
           callerName: user?.name || 'Someone',
@@ -77,21 +144,53 @@ const InlineCallButtons: React.FC<InlineCallButtonsProps> = ({
           callType: (type === CallType.AUDIO ? 'audio' : 'video') as 'audio' | 'video',
           meetingLink: link,
           timestamp: Date.now(),
-          recipientEmail: recipientEmail, // Important: send to the right person
+          recipientEmail: effectiveRecipientEmail, // Use resolved email
         };
         
-        console.log('🔔 Sending popup invitation:', invitation);
+        console.log('📞 ========================================');
+        console.log('📞 Step 8: SENDING POPUP INVITATION');
+        console.log('📞 ========================================');
+        console.log('🔔 Full invitation object:', JSON.stringify(invitation, null, 2));
+        console.log('📧 Popup will appear for user with email:', effectiveRecipientEmail);
+        console.log('📧 Current localStorage before send:', localStorage.getItem('social_hub_call_invitations'));
+        
         callInvitationManager.sendInvitation(invitation);
         
+        console.log('📧 Current localStorage after send:', localStorage.getItem('social_hub_call_invitations'));
+        
+        // NUCLEAR FORCE: Trigger multiple checks over time to GUARANTEE delivery
+        console.log('📞 ========================================');
+        console.log('💥 Step 9: NUCLEAR FORCE ACTIVATION');
+        console.log('📞 ========================================');
+        [100, 300, 500, 1000, 2000].forEach(delay => {
+          setTimeout(() => {
+            console.log(`💥 NUCLEAR FORCE: Force-check trigger at ${delay}ms`);
+            console.log(`   📧 Recipient email: ${effectiveRecipientEmail}`);
+            console.log(`   📦 Current localStorage:`, localStorage.getItem('social_hub_call_invitations'));
+            localStorage.setItem('social_hub_force_check', Date.now().toString());
+            window.dispatchEvent(new CustomEvent('call-force-check', { detail: invitation }));
+            window.dispatchEvent(new StorageEvent('storage', {
+              key: 'social_hub_call_invitations',
+              newValue: localStorage.getItem('social_hub_call_invitations'),
+              url: window.location.href
+            }));
+          }, delay);
+        });
+        
+        console.log('📞 ========================================');
+        console.log('📞 ✅ INVITATION SENT WITH NUCLEAR FORCE');
+        console.log('📞 ========================================');
+        
         toast.success('Call invitation sent!', {
-          description: `${recipientName} received the call link in chat and will get a popup`,
+          description: `${recipientName} received the call link in chat${effectiveRecipientEmail ? ' and should see a popup notification' : ''}`,
           duration: 4000,
         });
       } else {
+        console.error('❌ Failed to send message:', result.message);
         throw new Error(result.message || 'Failed to send message');
       }
     } catch (error) {
-      console.error('Failed to send meeting invite:', error);
+      console.error('❌ Failed to send meeting invite:', error);
       toast.error('Could not send invitation', {
         description: `Error: ${error instanceof Error ? error.message : 'Unknown error'}. Please copy and share the link manually.`,
         duration: 5000,

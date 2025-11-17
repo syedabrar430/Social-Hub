@@ -8,6 +8,7 @@ import { type ChatConversation, type ChatMessage } from '@/services/chat';
 import { chatService } from '@/services/chat';
 import { useToast } from '@/hooks/use-toast';
 import { Smile, Reply } from 'lucide-react';
+import { Linkify } from '@/lib/linkify';
 
 // Helper function to format message timestamp
 const formatMessageTime = (timestamp: string) => {
@@ -323,7 +324,12 @@ const MessagesWidget = () => {
                       {message.user?.username || message.user?.name}
                     </div>
                   )}
-                                  <p className="text-sm">{message.text || message.content}</p>
+                                  <div className="text-sm">
+                                    <Linkify 
+                                      text={message.text || message.content || ''} 
+                                      detectCallInvitations={true}
+                                    />
+                                  </div>
                                   <div className="text-xs opacity-70 mt-1">
                                     {formatMessageTime(message.timestamp)}
                                   </div>
